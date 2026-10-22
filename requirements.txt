@@ -1,0 +1,12 @@
+# Official LiveKit Agents Python v1.8 series, not the older v0.x API.
+livekit-agents[openai,silero]~=1.8.0
+livekit-api~=1.1
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+pydantic>=2,<3
+PyYAML>=6,<7
+httpx>=0.27,<1
+aiohttp>=3.10,<4
+python-dotenv>=1,<2
+numpy>=1.26,<3
+blingfire>=0.1.8,<1

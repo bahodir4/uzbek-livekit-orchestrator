@@ -1,0 +1,20 @@
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.bak
+__pycache__/
+.pytest_cache/
+*.pyc
+.venv/
+venv/
+*.log
+logs/
+.DS_Store
+*.wav
+*.mp3
+*.ogg
+
+# local provider config (contains live endpoints)
+config/agent.yaml
