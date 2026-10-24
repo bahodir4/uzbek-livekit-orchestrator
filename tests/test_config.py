@@ -12,7 +12,7 @@ class TestConfig(unittest.TestCase):
     def test_valid_default(self):
         data = load()
         self.assertEqual(data['active']['stt'], 'gigaam_primary')
-        self.assertEqual(active_spec(data, 'tts')['type'], 'sayro_http')
+        self.assertEqual(active_spec(data, 'tts')['type'], 'dual_gateway_stream')
 
     def test_secrets_cannot_be_committed_in_yaml(self):
         data = copy.deepcopy(load())

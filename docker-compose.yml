@@ -1,39 +1,30 @@
 services:
-  agent:
+  worker:
     build: .
-    image: uzbek-livekit-voice-agent:local
+    image: neurotech-orchestrator:local
     restart: unless-stopped
     init: true
     env_file: .env
     environment:
       AGENT_CONFIG_PATH: /app/config/agent.yaml
+    extra_hosts: ["host.docker.internal:host-gateway"]
     volumes:
       - ./config:/app/config:ro
       - ./knowledge:/app/knowledge:ro
     command: ["python", "-m", "voice_agent.worker", "start"]
-    # Official worker health endpoint is internal; expose only if needed.
-    ports:
-      - "127.0.0.1:8081:8081"
     stop_grace_period: 45s
-    networks: [agent_net]
-
-  admin:
-    image: uzbek-livekit-voice-agent:local
+  api:
     build: .
+    image: neurotech-orchestrator:local
     restart: unless-stopped
     init: true
     env_file: .env
     environment:
       AGENT_CONFIG_PATH: /app/config/agent.yaml
+    extra_hosts: ["host.docker.internal:host-gateway"]
     volumes:
       - ./config:/app/config:rw
       - ./knowledge:/app/knowledge:ro
-    # Bind only on loopback; use SSH tunnel or authenticated TLS reverse proxy.
     ports:
       - "127.0.0.1:8090:8090"
     command: ["uvicorn", "voice_agent.admin:app", "--host", "0.0.0.0", "--port", "8090", "--workers", "1"]
-    networks: [agent_net]
-
-networks:
-  agent_net:
-    driver: bridge

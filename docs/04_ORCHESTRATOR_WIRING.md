@@ -68,7 +68,7 @@ providers:
 ```bash
 docker compose build
 docker compose up -d
-docker compose logs -f agent
+docker compose logs -f worker api
 ```
 
 The `admin` service exposes protected Swagger only at `127.0.0.1:8090/docs` on the orchestrator host; do **not** publicly expose basic-auth admin over HTTP. Use an SSH tunnel/VPN if accessing from a different computer. Docker containers cannot access a different host's `127.0.0.1`; configure reachable service URLs.

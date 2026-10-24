@@ -17,7 +17,7 @@ DEFAULT_CONFIG = PROJECT_ROOT / "config" / "agent.yaml"
 SUPPORTED = {
     "stt": {"gigaam_ws"},
     "llm": {"openai_compatible"},
-    "tts": {"sayro_http"},
+    "tts": {"sayro_http", "dual_gateway_stream"},
 }
 
 
@@ -62,11 +62,24 @@ def validate(data: dict[str, Any]) -> dict[str, Any]:
     limit = int(data.get("capacity", {}).get("max_concurrent_jobs", 10))
     if not 1 <= limit <= 1000:
         raise ValueError("max_concurrent_jobs must be 1..1000")
-    tts_spec = active_spec(data, "tts")
-    if tts_spec.get("streaming_mode", "sentence_http") != "sentence_http":
-        raise ValueError("Only verified Sayro sentence_http protocol is supported")
-    if not 32 <= int(tts_spec.get("max_chars_per_request", 115)) <= 400:
-        raise ValueError("TTS max_chars_per_request must be 32..400")
+    for name, tts_spec in data.get("providers", {}).get("tts", {}).items():
+        mode = tts_spec.get("streaming_mode", "sentence_http")
+        if tts_spec.get("type") == "dual_gateway_stream":
+            if mode != "pcm_http":
+                raise ValueError("Dual gateway supports verified pcm_http streaming only")
+            if tts_spec.get("model", "sayro") not in ("sayro", "navoiy"):
+                raise ValueError("Dual TTS model must be sayro or navoiy")
+            if int(tts_spec.get("sample_rate", 24000)) != 24000:
+                raise ValueError("Dual gateway requires 24000 Hz PCM")
+            if not 32 <= int(tts_spec.get("max_chars_per_request", 180)) <= 350:
+                raise ValueError("Gateway max_chars_per_request must be 32..350")
+        elif tts_spec.get("type") == "sayro_http":
+            if mode != "sentence_http":
+                raise ValueError("Legacy Sayro requires sentence_http")
+            if not 32 <= int(tts_spec.get("max_chars_per_request", 115)) <= 400:
+                raise ValueError("Legacy Sayro max_chars_per_request must be 32..400")
+        else:
+            raise ValueError(f"Unsupported tts.{name} type")
     for category in SUPPORTED:
         for name, spec in data["providers"][category].items():
             if any(k in spec for k in ("api_key", "token", "password", "secret")):
@@ -82,7 +95,16 @@ def load(path: Path | None = None) -> dict[str, Any]:
     path = path or config_path()
     with path.open("r", encoding="utf-8") as file:
         data = yaml.safe_load(file)
-    return validate(data)
+    validate(data)
+    # The gateway is an INDEPENDENT deployment. An env URL override avoids
+    # rebuilding or modifying its source and keeps the image portable.
+    gateway_url = os.environ.get("TTS_GATEWAY_URL", "").strip()
+    if gateway_url:
+        if not gateway_url.startswith(("http://", "https://")):
+            raise ValueError("TTS_GATEWAY_URL must use http:// or https://")
+        if "dual_gateway" in data.get("providers", {}).get("tts", {}):
+            data["providers"]["tts"]["dual_gateway"]["url"] = gateway_url.rstrip("/")
+    return data
 
 
 def resolve_project_path(raw: str) -> Path:

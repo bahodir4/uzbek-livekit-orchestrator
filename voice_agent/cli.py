@@ -52,7 +52,7 @@ def add_provider(category: str, name: str, kind: str, url: str, api_key_env: str
 PROVIDER_FIELDS = {
     "stt": {"url", "api_key_env", "timeout_seconds"},
     "llm": {"url", "api_key_env", "model", "temperature", "max_completion_tokens"},
-    "tts": {"url", "api_key_env", "voice", "language", "task_type", "sample_rate", "max_new_tokens", "max_chars_per_request", "timeout_seconds", "max_audio_seconds", "seed", "trim_edge_silence", "silence_threshold", "streaming_mode"},
+    "tts": {"url", "api_key_env", "voice", "language", "task_type", "sample_rate", "max_new_tokens", "model", "emotion", "max_chars_per_request", "timeout_seconds", "max_audio_seconds", "seed", "trim_edge_silence", "silence_threshold", "streaming_mode"},
 }
 
 
@@ -66,7 +66,7 @@ def set_provider_field(category: str, name: str, field: str, raw_value: str) -> 
         value = json.loads(raw_value)
     except json.JSONDecodeError:
         value = raw_value  # URLs/model names are frequently bare strings.
-    if field in {"url", "model", "api_key_env", "voice", "language", "task_type", "streaming_mode"} and not isinstance(value, str):
+    if field in {"url", "model", "api_key_env", "voice", "emotion", "language", "task_type", "streaming_mode"} and not isinstance(value, str):
         raise ValueError(f"{field} must be a string")
     data["providers"][category][name][field] = value
     save_atomic(data)
@@ -105,7 +105,7 @@ async def doctor() -> int:
             elif category == "llm":
                 url = base + "/models"
             else:
-                url = base + "/health"
+                url = base + ("/health/ready" if spec["type"] == "dual_gateway_stream" else "/health")
             headers = {}
             key = credential(spec)
             if key:

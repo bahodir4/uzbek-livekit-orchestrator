@@ -28,8 +28,25 @@ def build_llm(config: dict[str, Any]):
     raise ValueError("Unsupported LLM type")
 
 
-def build_tts(config: dict[str, Any]):
+def build_tts(config: dict[str, Any], *, model_override: str | None = None):
     spec = active_spec(config, "tts")
+    if spec["type"] == "dual_gateway_stream":
+        from livekit.agents import tts, tokenize
+        from .adapters.dual_tts import DualGatewayTTS
+        model = model_override or spec.get("model", "sayro")
+        provider = DualGatewayTTS(
+            url=spec["url"], api_key=credential(spec, required=True), model=model,
+            emotion=spec.get("emotion", "calm"), voice=spec.get("voice", "sayro"),
+            timeout_seconds=float(spec.get("timeout_seconds", 120)),
+            max_audio_seconds=float(spec.get("max_audio_seconds", 35)),
+            max_chars_per_request=int(spec.get("max_chars_per_request", 180)),
+        )
+        return tts.StreamAdapter(
+            tts=provider,
+            sentence_tokenizer=tokenize.blingfire.SentenceTokenizer(retain_format=True),
+        )
+    if model_override is not None:
+        raise ValueError("Per-room model overrides require dual_gateway_stream")
     if spec["type"] == "sayro_http":
         from livekit.agents import tts, tokenize
         from .adapters.sayro import SayroTTS

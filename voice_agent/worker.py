@@ -7,13 +7,14 @@ from __future__ import annotations
 
 import datetime
 import logging
+import json
 import os
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 load_dotenv(override=False)
 
-from livekit.agents import Agent, AgentServer, AgentSession, JobContext, JobProcess, TurnHandlingOptions, cli, function_tool, RunContext
+from livekit.agents import Agent, AgentServer, AgentSession, JobContext, JobProcess, TurnHandlingOptions, cli, function_tool, RunContext, room_io
 from livekit.plugins import silero
 
 from .configuration import load, resolve_project_path
@@ -88,7 +89,18 @@ async def entrypoint(ctx: JobContext) -> None:
     turn = config.get("turn", {})
     stt_provider = build_stt(config)
     llm_provider = build_llm(config)
-    tts_provider = build_tts(config)
+    # Dispatch metadata is set by our authenticated room-creation API. The
+    # selected TTS model is pinned to this session, not changed on the fly.
+    override = None
+    try:
+        metadata = json.loads(getattr(ctx.job, "metadata", "") or "{}")
+        if isinstance(metadata, dict):
+            candidate = metadata.get("tts_model")
+            if candidate in ("sayro", "navoiy"):
+                override = candidate
+    except (ValueError, TypeError):
+        log.warning("Ignoring malformed dispatch metadata")
+    tts_provider = build_tts(config, model_override=override)
     instructions_file = resolve_project_path(config["agent"]["instructions_file"])
     instructions = instructions_file.read_text(encoding="utf-8")
     agent = Agent(instructions=instructions, tools=build_tools(config))
@@ -124,7 +136,10 @@ async def entrypoint(ctx: JobContext) -> None:
     log.info("Starting voice session room=%s stt=%s llm=%s tts=%s",
              ctx.room.name, *(config["active"][name] for name in ("stt", "llm", "tts")))
     try:
-        await session.start(room=ctx.room, agent=agent)
+        await session.start(
+            room=ctx.room, agent=agent,
+            room_options=room_io.RoomOptions(text_input=True, text_output=True),
+        )
         if config["agent"].get("auto_greet", True):
             await session.say(config["agent"].get("greeting", "Assalomu alaykum!"), allow_interruptions=True)
     except Exception:
