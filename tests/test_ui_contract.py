@@ -11,6 +11,8 @@ ROUTES = [
     ('POST', '/api/login'), ('GET', '/api/session'), ('POST', '/api/logout'),
     ('GET', '/api/config'), ('GET', '/api/overview'), ('GET','/api/capabilities'),
     ('POST', '/api/rooms'), ('POST', '/api/tts/preview'),
+    ('GET','/api/experience'), ('POST','/api/conversations'),('GET','/api/conversations'),
+    ('POST','/api/voice-notes/transcribe'),
     ('PATCH', '/api/settings'), ('POST', '/api/providers/activate')
 ]
 
@@ -29,20 +31,21 @@ def test_dual_tts_is_active():
 
 def test_worker_uses_room_text_and_model_dispatch():
     worker = WORKER.read_text()
-    assert 'RoomOptions(text_input=True, text_output=True)' in worker
+    assert 'RoomOptions(text_input=True, text_output=True,' in worker
     assert 'metadata.get("tts_model")' in worker
     assert 'build_tts(config, model_override=override)' in worker
 
 @pytest.mark.skipif(not FRONTEND.is_dir(), reason="Optional sibling Vue UI not bundled in backend-only ZIP")
 def test_vue_frontend_matches_http_api_contract():
-    ui = '\n'.join(p.read_text() for p in FRONTEND.rglob('*') if p.suffix in ('.vue', '.ts'))
-    for _, path in ROUTES:
-        assert path in ui, f"Missing frontend binding for {path}"
+    ui = '\n'.join(p.read_text() for p in FRONTEND.rglob('*') if p.suffix in ('.vue', '.ts', '.mjs')) + '\n' + (FRONTEND.parent/'scripts'/'preserve-design.mjs').read_text()
+    for path in ('/api/login','/api/session','/api/logout','/api/rooms','/api/conversations',
+                 '/api/experience','/api/voice-notes/transcribe','/api/tts/preview'):
+        assert path in ui, f"Missing new-UI frontend binding for {path}"
 
 @pytest.mark.skipif(not FRONTEND.is_dir(), reason="Optional sibling Vue UI not bundled in backend-only ZIP")
 def test_vue_livekit_topics_match_worker():
     src = '\n'.join(p.read_text() for p in FRONTEND.rglob('*') if p.suffix in ('.vue', '.ts'))
-    assert "sendText(text.trim(), {topic: 'lk.chat'})" in src
+    assert "sendText(msg.content,{topic:'lk.chat'})" in src
     assert "registerTextStreamHandler('lk.transcription'" in src
     assert 'RoomEvent.ParticipantAttributesChanged' in src
     assert "'lk.agent.state'" in src

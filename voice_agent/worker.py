@@ -14,12 +14,13 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 load_dotenv(override=False)
 
-from livekit.agents import Agent, AgentServer, AgentSession, JobContext, JobProcess, TurnHandlingOptions, cli, function_tool, RunContext, room_io
+from livekit.agents import Agent, AgentServer, AgentSession, ChatContext, JobContext, JobProcess, TurnHandlingOptions, cli, function_tool, RunContext, room_io
 from livekit.plugins import silero
 
 from .configuration import load, resolve_project_path
 from .knowledge import LocalKnowledgeStore
 from .providers import build_llm, build_stt, build_tts
+from .experience import agent_instructions, PERSONAS, LANGUAGES
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
@@ -92,9 +93,19 @@ async def entrypoint(ctx: JobContext) -> None:
     # Dispatch metadata is set by our authenticated room-creation API. The
     # selected TTS model is pinned to this session, not changed on the fly.
     override = None
+    persona = 'daniyar'
+    language = 'uz'
+    text_only = False
+    speak_responses = True
+    previous_messages = []
     try:
         metadata = json.loads(getattr(ctx.job, "metadata", "") or "{}")
         if isinstance(metadata, dict):
+            persona = metadata.get('persona') if metadata.get('persona') in PERSONAS else 'daniyar'
+            language = metadata.get('language') if metadata.get('language') in LANGUAGES else 'uz'
+            text_only = metadata.get('text_only') is True
+            speak_responses = metadata.get('speak_responses') is not False
+            previous_messages = metadata.get('previous_messages') if isinstance(metadata.get('previous_messages'), list) else []
             candidate = metadata.get("tts_model")
             if candidate in ("sayro", "navoiy"):
                 override = candidate
@@ -102,8 +113,14 @@ async def entrypoint(ctx: JobContext) -> None:
         log.warning("Ignoring malformed dispatch metadata")
     tts_provider = build_tts(config, model_override=override)
     instructions_file = resolve_project_path(config["agent"]["instructions_file"])
-    instructions = instructions_file.read_text(encoding="utf-8")
-    agent = Agent(instructions=instructions, tools=build_tools(config))
+    instructions = agent_instructions(persona, language, instructions_file.read_text(encoding="utf-8"))
+    # Construct a real LiveKit ChatContext; past user utterances never become
+    # system instructions. See docs.livekit.io/agents/logic/chat-context/.
+    initial_ctx = ChatContext()
+    for m in previous_messages[:12]:
+        if isinstance(m, dict) and m.get('role') in ('user','agent') and isinstance(m.get('text'), str):
+            initial_ctx.add_message(role='assistant' if m['role']=='agent' else 'user', content=m['text'][:400])
+    agent = Agent(instructions=instructions, chat_ctx=initial_ctx, tools=build_tools(config))
     session = AgentSession(
         stt=stt_provider, llm=llm_provider, tts=tts_provider,
         vad=ctx.proc.userdata["vad"],
@@ -135,13 +152,25 @@ async def entrypoint(ctx: JobContext) -> None:
 
     log.info("Starting voice session room=%s stt=%s llm=%s tts=%s",
              ctx.room.name, *(config["active"][name] for name in ("stt", "llm", "tts")))
+    # The UI interrupt control travels as a small LiveKit data packet.
+    # Commands are scoped to this room; text streams remain on lk.chat.
+    @ctx.room.on('data_received')
+    def on_ui_data(packet):
+        try:
+            event = json.loads(packet.data.decode('utf-8'))
+            if isinstance(event, dict) and event.get('type') == 'neurotech.interrupt':
+                session.interrupt()
+        except (ValueError, UnicodeDecodeError, RuntimeError):
+            log.debug('Ignoring unknown UI data packet')
+
     try:
         await session.start(
             room=ctx.room, agent=agent,
-            room_options=room_io.RoomOptions(text_input=True, text_output=True),
+            room_options=room_io.RoomOptions(text_input=True, text_output=True,
+                audio_input=not text_only, audio_output=speak_responses),
         )
-        if config["agent"].get("auto_greet", True):
-            await session.say(config["agent"].get("greeting", "Assalomu alaykum!"), allow_interruptions=True)
+        if config["agent"].get("auto_greet", True) and not text_only:
+            await session.say(("Assalomu alaykum!" if language=="uz" else "Здравствуйте!") + " Меня зовут " + PERSONAS[persona]["name"] + ". Чем могу помочь?" if language=="ru" else "Assalomu alaykum! Men " + PERSONAS[persona]["name"] + ". Sizga qanday yordam bera olaman?", allow_interruptions=True)
     except Exception:
         log.exception("LiveKit room session failed")
         raise

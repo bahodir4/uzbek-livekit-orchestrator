@@ -69,7 +69,8 @@ def test_activate_validation(console):
                         headers=headers)
     assert ok.status_code == 200
     assert load()['active']['tts'] == 'sayro_primary'
-    r = console.post('/api/rooms',json={"model":"navoiy"},headers=headers)
+    c = console.post('/api/conversations', json={'persona':'daniyar','language':'uz','tts_model':'navoiy'},headers=headers).json()
+    r = console.post('/api/rooms',json={"model":"navoiy","conversation_id":c['id']},headers=headers)
     assert r.status_code == 409  # legacy provider doesn't support per-room model override
 
 

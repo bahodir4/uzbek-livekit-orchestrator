@@ -1,30 +1,21 @@
+# Standalone orchestrator. External frontend can use http://<api-host>:8090 behind TLS.
 services:
   worker:
     build: .
-    image: neurotech-orchestrator:local
     restart: unless-stopped
     init: true
     env_file: .env
-    environment:
-      AGENT_CONFIG_PATH: /app/config/agent.yaml
-    extra_hosts: ["host.docker.internal:host-gateway"]
-    volumes:
-      - ./config:/app/config:ro
-      - ./knowledge:/app/knowledge:ro
+    environment: {AGENT_CONFIG_PATH: /app/config/agent.yaml}
+    volumes: ["./config:/app/config:ro", "./knowledge:/app/knowledge:ro"]
     command: ["python", "-m", "voice_agent.worker", "start"]
-    stop_grace_period: 45s
   api:
     build: .
-    image: neurotech-orchestrator:local
     restart: unless-stopped
     init: true
     env_file: .env
-    environment:
-      AGENT_CONFIG_PATH: /app/config/agent.yaml
-    extra_hosts: ["host.docker.internal:host-gateway"]
-    volumes:
-      - ./config:/app/config:rw
-      - ./knowledge:/app/knowledge:ro
-    ports:
-      - "127.0.0.1:8090:8090"
+    environment: {AGENT_CONFIG_PATH: /app/config/agent.yaml}
+    volumes: ["./config:/app/config:rw", "./knowledge:/app/knowledge:ro", "conversation_data:/app/data"]
+    ports: ["127.0.0.1:8090:8090"]
     command: ["uvicorn", "voice_agent.admin:app", "--host", "0.0.0.0", "--port", "8090", "--workers", "1"]
+volumes:
+  conversation_data:

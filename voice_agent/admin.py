@@ -15,7 +15,7 @@ from typing import Literal
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import Depends, FastAPI, HTTPException, status, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, status, Request, Response, UploadFile, File
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -141,7 +141,7 @@ async def logout(request: Request, response: Response, _: str = Depends(mutation
 @app.get("/api/session")
 async def session_info(request: Request):
     tok = request.cookies.get(SESSION_COOKIE, "")
-    return {"authenticated": bool(tok and _sessions.get(tok, 0) > time.time())}
+    return {"authenticated": bool(tok and _sessions.get(tok, 0) > time.time()), "username": os.getenv("ADMIN_USERNAME", "") if tok and _sessions.get(tok, 0) > time.time() else None}
 
 
 @app.get("/api/config")
@@ -258,6 +258,9 @@ async def capabilities(_: str = Depends(require_admin)):
                 "sample_rate": 24000, "channels": 1, "preview_max_chars": 350},
         "settings_scope": "new_sessions_only",
         "per_room_model_selection": active_spec(config, "tts")["type"] == "dual_gateway_stream",
+        "history": {"persistent": True, "user_scoped": True},
+        "personas": list(PERSONAS) if 'PERSONAS' in globals() else ['daniyar','leyla','sofia'],
+        "voice_notes": {"enabled": True, "language": "uz", "transport": "http_multipart_to_gigaam"},
     }
 
 
@@ -341,12 +344,138 @@ async def preview(body: PreviewRequest, _: str = Depends(mutation_auth)):
     })
 
 
+
+# --- New customer-facing UI APIs. Every operation is user-scoped. ---
+from . import conversations as history
+from .experience import PERSONAS, LANGUAGES, check_preferences
+
+@app.get("/api/experience")
+async def experience(_: str = Depends(require_admin)):
+    return {
+        "personas": [{k:v for k,v in persona.items() if k != "instructions"}
+                     for persona in PERSONAS.values()],
+        "languages": [ {"code": code, "name": value, "voice_input_supported": code == "uz"}
+                      for code,value in LANGUAGES.items()],
+        "tts_models": ["sayro", "navoiy"],
+        "limits": {"voice_note_seconds": 60, "voice_note_max_bytes": 8_000_000},
+        "limitations": ["GigaAM microphone transcription is configured for Uzbek only",
+                        "Voice pitch/speed and persona-specific voice gender are not supported by the gateway"]
+    }
+
+class ConversationCreate(BaseModel):
+    persona: Literal["john", "daniyar", "leila", "leyla", "sofia"] = "daniyar"
+    language: Literal["uz", "ru", "en"] = "uz"
+    tts_model: Literal["sayro", "navoiy"] = "sayro"
+
+@app.get("/api/conversations")
+async def all_conversations(user: str = Depends(require_admin)):
+    return {"items": history.list_items(user)}
+
+@app.post("/api/conversations", status_code=201)
+async def new_conversation(body: ConversationCreate, user: str = Depends(mutation_auth)):
+    check_preferences(body.persona, body.language, body.tts_model)
+    return history.create(user, body.persona, body.language, body.tts_model)
+
+@app.get("/api/conversations/{conversation_id}")
+async def one_conversation(conversation_id: str, user: str = Depends(require_admin)):
+    record = history.get(user, conversation_id)
+    if record is None: raise HTTPException(404, "Conversation not found")
+    return record
+
+class MessageAppend(BaseModel):
+    id: str = Field(pattern=r"^[a-zA-Z0-9:_-]{1,120}$")
+    role: Literal["user", "agent"]
+    kind: Literal["chat", "transcription", "voice_note", "system"]
+    text: str = Field(min_length=1, max_length=12000)
+    final: bool = True
+
+@app.put("/api/conversations/{conversation_id}/messages")
+async def save_message(conversation_id: str, body: MessageAppend, user: str = Depends(mutation_auth)):
+    if not history.append(user, conversation_id, body.id, body.role, body.kind, body.text, body.final):
+        raise HTTPException(404, "Conversation not found")
+    return {"saved": True}
+
+class CallTime(BaseModel):
+    seconds: int = Field(ge=0, le=86400)
+
+@app.patch("/api/conversations/{conversation_id}/call")
+async def save_call_length(conversation_id: str, body: CallTime, user: str = Depends(mutation_auth)):
+    if not history.set_call_length(user, conversation_id, body.seconds):
+        raise HTTPException(404, "Conversation not found")
+    return {"saved": True}
+
+@app.delete("/api/conversations/{conversation_id}")
+async def remove_conversation(conversation_id: str, user: str = Depends(mutation_auth)):
+    if not history.delete(user, conversation_id):
+        raise HTTPException(404, "Conversation not found")
+    return {"deleted": True}
+
+@app.delete("/api/conversations")
+async def clear_conversations(user: str = Depends(mutation_auth)):
+    return {"deleted_count": history.clear(user)}
+
+@app.post("/api/voice-notes/transcribe")
+async def transcribe_voice_note(file: UploadFile = File(...), user: str = Depends(mutation_auth)):
+    """Convert browser WebM/OGG into 16k mono WAV; forward to existing GigaAM HTTP STT.
+
+    No model inference is faked. Exposes no STT key to browsers.
+    """
+    import subprocess
+    import tempfile
+    import pathlib
+    if file.content_type not in ("audio/webm", "audio/ogg", "audio/mp4", "audio/wav", "application/octet-stream"):
+        raise HTTPException(415, "Unsupported audio format")
+    payload = await file.read(8_000_001)
+    if len(payload)>8_000_000: raise HTTPException(413, "Audio too large")
+    if len(payload)<200: raise HTTPException(422, "Audio too short")
+    with tempfile.TemporaryDirectory() as td:
+        source = pathlib.Path(td) / 'voice-note.input'
+        target = pathlib.Path(td) / 'voice-note.wav'
+        source.write_bytes(payload)
+        try:
+            result = await asyncio.to_thread(subprocess.run,
+                ['ffmpeg','-nostdin','-hide_banner','-loglevel','error','-y','-i',str(source),
+                 '-vn','-ac','1','-ar','16000','-t','60',str(target)],
+                capture_output=True, timeout=15, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            raise HTTPException(502, "Audio conversion unavailable")
+        if result.returncode != 0 or not target.exists():
+            raise HTTPException(422, "Unable to decode voice note")
+        wav = target.read_bytes()
+        if len(wav)>2_100_000: raise HTTPException(413, "Converted audio too large")
+    cfg=load()
+    spec=active_spec(cfg,'stt')
+    key=credential(spec)
+    try:
+        async with httpx.AsyncClient(timeout=40.0,follow_redirects=False) as client:
+            response = await client.post(spec['url'].rstrip('/') + '/v1/audio/transcriptions',
+               headers={'Authorization':f'Bearer {key}'},
+               files={'file':('voice-note.wav',wav,'audio/wav')},data={'language':'uz'})
+            response.raise_for_status()
+            text=response.json().get('text','')
+    except (httpx.HTTPError,ValueError) as exc:
+        raise HTTPException(502, f"STT service unavailable ({type(exc).__name__})") from exc
+    if not isinstance(text,str) or not text.strip(): raise HTTPException(422,"Could not recognize speech")
+    return {'text':text.strip(),'language':'uz','duration_limited_seconds':60}
+
 class RoomRequest(BaseModel):
     model: Literal["sayro", "navoiy"] = "sayro"
+    persona: Literal["john", "daniyar", "leila", "leyla", "sofia"] = "daniyar"
+    language: Literal["uz", "ru", "en"] = "uz"
+    conversation_id: str = Field(min_length=1, max_length=64)
+    text_only: bool = False
+    speak_responses: bool = True
 
 
 @app.post("/api/rooms")
-async def create_room(body: RoomRequest, _: str = Depends(mutation_auth)):
+async def create_room(body: RoomRequest, user: str = Depends(mutation_auth)):
+    check_preferences(body.persona, body.language, body.model)
+    existing = history.get(user, body.conversation_id)
+    if existing is None: raise HTTPException(404, "Conversation not found")
+    if (existing['persona'], existing['language'], existing['tts_model']) != (body.persona,body.language,body.model):
+        raise HTTPException(409, "Conversation preferences cannot change mid-session; create a new conversation")
+    if body.language != 'uz' and not body.text_only:
+        raise HTTPException(422, "The configured GigaAM microphone STT supports Uzbek only. Use text chat for other languages.")
     config = load()
     if active_spec(config, "tts")["type"] != "dual_gateway_stream":
         raise HTTPException(409, "Select dual_gateway as the active TTS provider for per-call routing")
@@ -356,12 +485,18 @@ async def create_room(body: RoomRequest, _: str = Depends(mutation_auth)):
     secret = os.getenv("LIVEKIT_API_SECRET", "")
     if not url or not key or not secret or any(s.startswith("YOUR_") for s in (url, key, secret)):
         raise HTTPException(503, "LiveKit credentials are not configured")
-    room_name = "studio-" + uuid.uuid4().hex[:20]
+    room_name = "chat-" + uuid.uuid4().hex[:20]
+    # A fresh LiveKit job may resume a saved UI conversation; provide a small,
+    # bounded history snapshot for conversational continuity (not for authority).
+    resume = [ {"role": msg["role"], "text": msg["text"][:400]}
+               for msg in existing["messages"] if msg["final"] and msg["role"] in ("user", "agent")][-12:]
     try:
         async with api.LiveKitAPI(url=url, api_key=key, api_secret=secret) as lk:
             await lk.agent_dispatch.create_dispatch(api.CreateAgentDispatchRequest(
                 room=room_name, agent_name=config["agent"]["name"],
-                metadata=json.dumps({"tts_model": body.model}),
+                metadata=json.dumps({"tts_model": body.model, "persona": body.persona, "language": body.language,
+                                     "text_only": body.text_only, "speak_responses": body.speak_responses,
+                                     "previous_messages": resume}),
             ))
         token = (api.AccessToken(key, secret)
                  .with_identity("operator-" + uuid.uuid4().hex[:16])
@@ -373,4 +508,25 @@ async def create_room(body: RoomRequest, _: str = Depends(mutation_auth)):
     except Exception as exc:
         log.exception("LiveKit dispatch failed")
         raise HTTPException(502, f"LiveKit dispatch failed ({type(exc).__name__})") from exc
-    return {"room": room_name, "url": url, "token": token, "model": body.model}
+    return {"room": room_name, "url": url, "token": token, "model": body.model, "persona":body.persona, "language":body.language, "conversation_id":body.conversation_id}
+
+# Exact supplied dist.zip includes persona, language, voice enable and pitch/rate
+# controls. Persist user choices, but do not pretend unsupported GPU TTS controls
+# are implemented: only tts_model and voice_enabled route to LiveKit on new rooms.
+from . import preferences
+
+class UIUserPreferences(BaseModel):
+    persona_id: Literal['john','daniyar','leila','leyla','sofia'] = 'john'
+    language: Literal['auto','uz','ru','en'] = 'auto'
+    tts_model: Literal['sayro','navoiy'] = 'sayro'
+    voice_enabled: bool = True
+    rate: float = Field(default=1,ge=0.5,le=2)
+    pitch: float = Field(default=1,ge=0.5,le=2)
+
+@app.get('/api/preferences')
+async def get_preferences(user: str = Depends(require_admin)):
+    return preferences.get(user) or UIUserPreferences().model_dump()
+
+@app.put('/api/preferences')
+async def save_preferences(body: UIUserPreferences, user: str = Depends(mutation_auth)):
+    return preferences.put(user,body.model_dump())
