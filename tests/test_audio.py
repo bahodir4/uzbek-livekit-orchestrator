@@ -2,12 +2,20 @@ import io
 import wave
 import unittest
 import numpy as np
-from voice_agent.audio_utils import split_long_phrase, trim_pcm_edges, decode_wav_pcm16
+from voice_agent.audio_utils import split_for_fast_start, split_long_phrase, trim_pcm_edges, decode_wav_pcm16
 
 
 class TestSayroAudio(unittest.TestCase):
     def test_split_keeps_short(self):
         self.assertEqual(split_long_phrase("Assalomu alaykum!", 70), ["Assalomu alaykum!"])
+
+    def test_fast_start_isolates_short_opener(self):
+        result = split_for_fast_start("Xo'p, tushundim. Sizga kredit bo'yicha yordam bera olaman.", 70)
+        self.assertEqual(result[0], "Xo'p, tushundim.")
+        self.assertEqual(" ".join(result), "Xo'p, tushundim. Sizga kredit bo'yicha yordam bera olaman.")
+
+    def test_fast_start_keeps_short_single_phrase(self):
+        self.assertEqual(split_for_fast_start("Salom.", 70), ["Salom."])
 
     def test_split_long_at_words(self):
         result = split_long_phrase("bir ikki uch to'rt besh olti yetti", 18)

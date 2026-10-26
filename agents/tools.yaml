@@ -1,0 +1,36 @@
+# What the language model is told about each tool (when to call it, what the arguments mean).
+# The code that runs a tool lives in voice_agent/agent_tools.py; which agent gets which tool is in agents/<id>.yaml.
+calculate_loan:
+  description: >-
+    Kredit to'lovini hisoblaydi. amount - kredit summasi (so'm), months - muddat (oy), annual_rate - yillik foiz (masalan 24),
+    kind - 'annuitet' (teng oylik to'lov) yoki 'differensial'. Foizni mijoz aytgan bo'lsagina ishlating.
+loan_documents_checklist:
+  description: >-
+    Kredit turi bo'yicha odatda kerak bo'ladigan hujjatlar ro'yxati. loan_type: 'iste'mol', 'ipoteka', 'avto' yoki 'biznes'.
+create_support_ticket:
+  description: >-
+    Mijoz murojaatini ro'yxatga oladi va raqam beradi. category: karta, hisob, mobil ilova, to'lov, kredit yoki boshqa.
+    summary - muammoning qisqa mazmuni, phone - mijozning telefon raqami. Karta PIN-kodi, CVV yoki parolni hech qachon so'ramang.
+check_ticket_status:
+  description: Murojaat holatini murojaat raqami (ticket_number) bo'yicha aytadi.
+available_slots:
+  description: >-
+    Berilgan sanada bo'sh uchrashuv vaqtlarini aytadi. date_iso - YYYY-OO-KK, masalan 2026-11-05.
+    Ish vaqti: {work_hours}.
+book_appointment:
+  description: >-
+    Uchrashuvga yozadi. date_iso - YYYY-OO-KK, time_hhmm - SS:DD (available_slots bergan vaqtlardan biri), full_name - mijoz ismi,
+    phone - telefon, purpose - uchrashuv maqsadi. Avval mijozdan hamma ma'lumotni so'rab oling.
+cancel_appointment:
+  description: >-
+    Uchrashuvni bekor qiladi. appointment_number - uchrashuv raqami, phone - yozilgan telefon raqami; ikkalasi mos kelishi kerak.
+calculate_deposit:
+  description: >-
+    Omonat daromadini hisoblaydi. amount - omonat summasi (so'm), months - muddat (oy), annual_rate - yillik foiz,
+    monthly_capitalization - foiz har oy qo'shib borilsinmi. Foizni mijoz aytgan bo'lsagina ishlating.
+savings_goal_plan:
+  description: >-
+    Maqsadga yetish uchun har oy qancha jamg'arish kerakligini hisoblaydi. goal - maqsad summasi, months - muddat (oy),
+    annual_rate - yillik foiz (yo'q bo'lsa 0), initial - hozirgi jamg'arma.
+current_date_time:
+  description: Hozirgi sana va vaqtni (Toshkent) aytadi; uchrashuv sanasini aniqlashda kerak.

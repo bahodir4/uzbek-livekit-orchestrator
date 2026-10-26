@@ -12,7 +12,7 @@ def test_ui_persona_and_preferences(monkeypatch,tmp_path):
         assert client.post('/api/login',json={'username':'tester','password':'long-unit-testing-password'}).status_code==200
         session=client.get('/api/session').json()
         assert session['authenticated'] is True and session['username']=='tester'
-        assert {'john','daniyar','leila','sofia'} <= {p['id'] for p in client.get('/api/experience').json()['personas']}
+        assert {'sofiya','malika','dilnoza','zarina'} <= {p['id'] for p in client.get('/api/experience').json()['personas']}
         body={'persona_id':'leila','language':'auto','tts_model':'navoiy','voice_enabled':True,'rate':1.25,'pitch':0.9}
         assert client.put('/api/preferences',json=body,headers={'X-Voice-UI':'1'}).status_code==200
         assert client.get('/api/preferences').json()==body

@@ -1,0 +1,51 @@
+# Everything the tools say back (the model reads it aloud / rephrases it). Placeholders: {like_this}.
+money: "{value} so'm"
+weekdays: [dushanba, seshanba, chorshanba, payshanba, juma, shanba, yakshanba]
+labels:
+  break: tanaffus
+
+errors:
+  invalid: "Kiritilgan ma'lumot noto'g'ri: {reason}."
+  storage: "Kechirasiz, ma'lumotni hozir saqlab bo'lmadi. Iltimos, birozdan keyin qayta urinib ko'ring."
+  generic: "Kechirasiz, bu amalni hozir bajarib bo'lmadi."
+
+fields:                            # names used inside validation messages
+  loan_amount: kredit summasi
+  deposit_amount: omonat summasi
+  goal: maqsad summasi
+  initial: boshlang'ich summa
+  months: muddat (oy)
+  rate: yillik foiz
+
+validation:
+  range: "{name} {low} dan {high} gacha bo'lishi kerak"
+  phone: "telefon raqami noto'g'ri; kamida 9 ta raqam kerak"
+  date_format: "sana YYYY-OO-KK ko'rinishida bo'lishi kerak, masalan 2026-11-05"
+  date_past: "o'tib ketgan sanaga yozib bo'lmaydi"
+  date_far: "{days} kundan keyingi sanaga yozib bo'lmaydi"
+  date_closed: "bu kun dam olish kuni (ish kunlari: {days})"
+  slot_invalid: "vaqt ish vaqtiga to'g'ri kelmaydi ({work_hours})"
+  slot_passed: "bu vaqt o'tib ketgan"
+  name_empty: "mijoz ismi bo'sh"
+  summary_empty: "murojaat mazmuni bo'sh"
+  loan_type: "kredit turi {kinds} bo'lishi kerak"
+  no_purpose: "ko'rsatilmagan"
+
+results:
+  loan_annuity: "Annuitet usulida oylik to'lov taxminan {monthly}, jami to'lov {total}, ortiqcha to'lov {overpay}. Bu taxminiy hisob; rasmiy shartlarni bank aniqlaydi."
+  loan_differential: "Differensial usulda birinchi oy to'lovi taxminan {first}, oxirgi oy {last}, jami to'lov {total}, ortiqcha to'lov {overpay}. Bu taxminiy hisob."
+  loan_documents: "{kind} krediti uchun odatda kerak: {items}. Bu umumiy ro'yxat; aniq talablarni bank filialida tasdiqlang."
+  ticket_created: "Murojaat ro'yxatga olindi. Murojaat raqami {number}. Bu raqamni eslab qoling; holatini keyin so'rashingiz mumkin."
+  ticket_status: "{number} raqamli murojaat ({category}) holati: {status}."
+  ticket_missing: "Bunday raqamli murojaat topilmadi. Raqamni tekshirib, qayta ayting."
+  slots_free: "{day} sanasida bo'sh vaqtlar: {times}{more}."
+  slots_more: " va yana {count} ta"
+  slots_none: "{day} sanasida bo'sh vaqt qolmagan. Boshqa kunni tanlang."
+  appointment_confirmed: "Uchrashuv tasdiqlandi: {day}, soat {slot}. Uchrashuv raqami {number}."
+  appointment_taken: "Afsuski, bu vaqt band bo'lib qoldi. Boshqa vaqtni tanlang."
+  appointment_cancelled: "Uchrashuv bekor qilindi."
+  appointment_not_found: "Bunday uchrashuv topilmadi yoki telefon raqami mos kelmadi."
+  deposit: "Muddat oxirida omonat taxminan {final} bo'ladi, daromad taxminan {income}. Bu taxminiy hisob; rasmiy shartlarni bank aniqlaydi."
+  savings_need: "Maqsadga yetish uchun har oy taxminan {monthly} jamg'arish kerak."
+  savings_reached: "Hozirgi jamg'arma bu muddatda maqsadga yetish uchun yetarli, qo'shimcha to'lov kerak emas."
+  current_time: "Hozir Toshkent vaqti bilan {now}, {weekday}."

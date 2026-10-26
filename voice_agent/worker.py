@@ -20,7 +20,7 @@ from livekit.plugins import silero
 from .configuration import load, resolve_project_path
 from .knowledge import LocalKnowledgeStore
 from .providers import build_llm, build_stt, build_tts
-from .experience import agent_instructions, PERSONAS, LANGUAGES
+from .experience import agent_instructions, canonical_persona, DEFAULT_PERSONA, PERSONAS, LANGUAGES
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
@@ -38,6 +38,11 @@ server.load_fnc = compute_load
 
 
 def prewarm(proc: JobProcess) -> None:
+    # Import heavy modules here, once per job process, instead of on the first turn: these
+    # imports blocked the event loop for 0.4-0.9s and could time out the first job assignment.
+    import numpy.fft  # noqa: F401  (used by LiveKit's speaking-rate estimator)
+    import openai.lib.streaming.chat  # noqa: F401  (first chat.completions call)
+    from livekit.plugins import openai as _openai  # noqa: F401  (realtime/types pydantic models)
     config = load()
     vad = config.get("vad", {})
     proc.userdata["vad"] = silero.VAD.load(
@@ -50,7 +55,7 @@ def prewarm(proc: JobProcess) -> None:
 server.setup_fnc = prewarm
 
 
-def build_tools(config: dict):
+def build_tools(config: dict, persona: str = DEFAULT_PERSONA):
     knowledge = config.get("knowledge", {})
     allowed = set(knowledge.get("enabled_tools", []))
     result = []
@@ -81,6 +86,11 @@ def build_tools(config: dict):
             return local.isoformat(timespec="seconds")
 
         result.append(current_date)
+    try:
+        from .agent_tools import tools_for
+        result.extend(tools_for(canonical_persona(persona)))
+    except Exception:  # a tool-registration problem must never stop the session from starting
+        log.exception("Could not register agent tools for %s", persona)
     return result
 
 
@@ -93,7 +103,7 @@ async def entrypoint(ctx: JobContext) -> None:
     # Dispatch metadata is set by our authenticated room-creation API. The
     # selected TTS model is pinned to this session, not changed on the fly.
     override = None
-    persona = 'daniyar'
+    persona = DEFAULT_PERSONA
     language = 'uz'
     text_only = False
     speak_responses = True
@@ -101,7 +111,7 @@ async def entrypoint(ctx: JobContext) -> None:
     try:
         metadata = json.loads(getattr(ctx.job, "metadata", "") or "{}")
         if isinstance(metadata, dict):
-            persona = metadata.get('persona') if metadata.get('persona') in PERSONAS else 'daniyar'
+            persona = canonical_persona(metadata.get('persona'))
             language = metadata.get('language') if metadata.get('language') in LANGUAGES else 'uz'
             text_only = metadata.get('text_only') is True
             speak_responses = metadata.get('speak_responses') is not False
@@ -120,7 +130,11 @@ async def entrypoint(ctx: JobContext) -> None:
     for m in previous_messages[:12]:
         if isinstance(m, dict) and m.get('role') in ('user','agent') and isinstance(m.get('text'), str):
             initial_ctx.add_message(role='assistant' if m['role']=='agent' else 'user', content=m['text'][:400])
-    agent = Agent(instructions=instructions, chat_ctx=initial_ctx, tools=build_tools(config))
+    agent_tools = build_tools(config, persona)
+    log.info("Agent %s ready: tools=%s text_only=%s", persona,
+             [getattr(t, 'info', None).name if getattr(t, 'info', None) else getattr(t, '__name__', '?') for t in agent_tools],
+             text_only)
+    agent = Agent(instructions=instructions, chat_ctx=initial_ctx, tools=agent_tools)
     session = AgentSession(
         stt=stt_provider, llm=llm_provider, tts=tts_provider,
         vad=ctx.proc.userdata["vad"],
@@ -167,10 +181,10 @@ async def entrypoint(ctx: JobContext) -> None:
         await session.start(
             room=ctx.room, agent=agent,
             room_options=room_io.RoomOptions(text_input=True, text_output=True,
-                audio_input=not text_only, audio_output=speak_responses),
+                audio_input=not text_only, audio_output=speak_responses and not text_only),
         )
         if config["agent"].get("auto_greet", True) and not text_only:
-            await session.say(("Assalomu alaykum!" if language=="uz" else "Здравствуйте!") + " Меня зовут " + PERSONAS[persona]["name"] + ". Чем могу помочь?" if language=="ru" else "Assalomu alaykum! Men " + PERSONAS[persona]["name"] + ". Sizga qanday yordam bera olaman?", allow_interruptions=True)
+            await session.say(PERSONAS[persona]["greeting"], allow_interruptions=True)
     except Exception:
         log.exception("LiveKit room session failed")
         raise

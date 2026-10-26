@@ -1,0 +1,18 @@
+# Which agents exist, in UI order. Each id has its own file: agents/<id>.yaml
+default: sofiya
+agents: [sofiya, malika, dilnoza, zarina]
+
+# Ids written by earlier UI builds (stored preferences / old conversations) -> current agent.
+legacy_aliases:
+  sofia: sofiya
+  john: sofiya
+  daniyar: sofiya
+  leila: malika
+  leyla: malika
+
+# Added to every agent's instructions after the agent prompt.
+locale_instructions:
+  uz: "Reply in Uzbek (Latin script)."
+  ru: "Reply in Russian."
+  en: "Reply in English."
+guard_instruction: "Do not invent facts, capabilities, phone actions, or outside knowledge."

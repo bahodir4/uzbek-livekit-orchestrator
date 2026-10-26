@@ -82,3 +82,20 @@ Successful SSE responses arrive progressively as `data: ...` events. Remote orch
 - **401:** The agent and server must use the **same** new API key, without `Bearer` in the `.env` value.
 
 **Upstream documentation:** https://docs.vllm.ai/projects/recipes/en/stable/Google/Gemma4.html · https://docs.vllm.ai/en/stable/getting_started/quickstart/ · https://huggingface.co/google/gemma-4-31B-it
+
+## E. Tuning for voice latency (first token under ~1 s)
+
+Measured through the RunPod HTTPS proxy: first token 0.8-1.8 s, of which ~0.5-1 s is proxy overhead.
+Fix the placement first (run the worker in the same datacenter and use the pod's private/localhost URL),
+then tune the server:
+
+- Keep prefix caching on (default in vLLM V1; the system prompt + history are reused every turn).
+- Lower the context to what a voice call needs: `--max-model-len 4096` (smaller KV cache, more headroom).
+- Cap concurrency to what you serve: `--max-num-seqs 8` (voice calls are few and latency-sensitive).
+- Decode speed is memory-bandwidth bound (~62 GB of BF16 weights per token). The only big lever is
+  fewer bytes per token: weight-only FP8 (`--quantization fp8`) or a smaller instruct model.
+  Validate Uzbek answer quality after any change; test with the curl smoke test above.
+- Keep replies short in the orchestrator (`max_completion_tokens: 120`) and keep thinking/reasoning
+  output off for voice.
+
+Verify with the orchestrator log line `Voice metric ... stage=llm {'ttft': ...}` (target < 1 s).

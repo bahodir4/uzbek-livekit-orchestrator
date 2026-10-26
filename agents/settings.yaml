@@ -1,0 +1,31 @@
+# Business rules used by the tools. Change values here; no code change needed.
+timezone_offset_hours: 5          # Uzbekistan, no daylight saving
+
+limits:
+  amount_max: 1000000000000
+  rate_max: 120
+  loan_months_max: 360
+  deposit_months_max: 600
+
+appointments:
+  work_days: [0, 1, 2, 3, 4]      # Monday=0 ... Sunday=6
+  day_start: "09:00"
+  day_end: "17:00"
+  slot_minutes: 30
+  breaks: [["13:00", "14:00"]]
+  capacity_per_slot: 2            # visitors per time slot
+  max_days_ahead: 60
+
+records:
+  ticket_start: 100001            # first ticket number (6 digits are easy to read over the phone)
+  appointment_start: 200001
+
+tickets:
+  categories: [karta, hisob, mobil ilova, "to'lov", kredit, boshqa]
+  default_category: boshqa
+
+loan_documents:                   # general lists only; the bank confirms exact requirements
+  "iste'mol": ["pasport yoki ID-karta", "daromad to'g'risidagi ma'lumotnoma", "ish joyidan ma'lumotnoma"]
+  ipoteka: ["pasport yoki ID-karta", "daromad to'g'risidagi ma'lumotnoma", "ish joyidan ma'lumotnoma", "ko'chmas mulk hujjatlari", "boshlang'ich to'lov mavjudligini tasdiqlovchi hujjat"]
+  avto: ["pasport yoki ID-karta", "daromad to'g'risidagi ma'lumotnoma", "ish joyidan ma'lumotnoma", "avtomobil bo'yicha shartnoma yoki hisob-faktura"]
+  biznes: ["pasport yoki ID-karta", "tadbirkorlik faoliyatini tasdiqlovchi hujjatlar", "oxirgi davr moliyaviy hisobotlari", "ta'minot bo'yicha hujjatlar"]

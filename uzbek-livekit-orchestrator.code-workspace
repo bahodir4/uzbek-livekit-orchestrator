@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../uzbek-dual-tts-backend"
+		},
+		{
+			"path": "../neurotech-conversation-ui"
+		},
+		{
+			"path": "../gigaam-livekit-stt"
+		}
+	],
+	"settings": {}
+}

@@ -347,7 +347,19 @@ async def preview(body: PreviewRequest, _: str = Depends(mutation_auth)):
 
 # --- New customer-facing UI APIs. Every operation is user-scoped. ---
 from . import conversations as history
-from .experience import PERSONAS, LANGUAGES, check_preferences
+from .experience import PERSONAS, LANGUAGES, PERSONA_IDS, DEFAULT_PERSONA, check_preferences
+from typing import Annotated
+from pydantic import AfterValidator
+
+
+def _known_persona(value: str) -> str:
+    if value not in PERSONA_IDS:
+        raise ValueError("Unknown agent")
+    return value
+
+
+# Current agents (agents/index.yaml) plus the ids older UI builds stored; legacy ids map to a current agent in the worker.
+PersonaId = Annotated[str, AfterValidator(_known_persona)]
 
 @app.get("/api/experience")
 async def experience(_: str = Depends(require_admin)):
@@ -363,9 +375,10 @@ async def experience(_: str = Depends(require_admin)):
     }
 
 class ConversationCreate(BaseModel):
-    persona: Literal["john", "daniyar", "leila", "leyla", "sofia"] = "daniyar"
+    persona: PersonaId = DEFAULT_PERSONA
     language: Literal["uz", "ru", "en"] = "uz"
-    tts_model: Literal["sayro", "navoiy"] = "sayro"
+    tts_model: Literal["sayro", "navoiy"] = "navoiy"
+    kind: Literal["chat", "call"] = "chat"
 
 @app.get("/api/conversations")
 async def all_conversations(user: str = Depends(require_admin)):
@@ -374,7 +387,7 @@ async def all_conversations(user: str = Depends(require_admin)):
 @app.post("/api/conversations", status_code=201)
 async def new_conversation(body: ConversationCreate, user: str = Depends(mutation_auth)):
     check_preferences(body.persona, body.language, body.tts_model)
-    return history.create(user, body.persona, body.language, body.tts_model)
+    return history.create(user, body.persona, body.language, body.tts_model, body.kind)
 
 @app.get("/api/conversations/{conversation_id}")
 async def one_conversation(conversation_id: str, user: str = Depends(require_admin)):
@@ -423,11 +436,14 @@ async def transcribe_voice_note(file: UploadFile = File(...), user: str = Depend
     import subprocess
     import tempfile
     import pathlib
-    if file.content_type not in ("audio/webm", "audio/ogg", "audio/mp4", "audio/wav", "application/octet-stream"):
+    # MediaRecorder labels blobs like "audio/webm;codecs=opus"; compare the bare media type.
+    if (file.content_type or "").split(";")[0].strip().lower() not in ("audio/webm", "audio/ogg", "audio/mp4", "audio/wav", "application/octet-stream"):
         raise HTTPException(415, "Unsupported audio format")
     payload = await file.read(8_000_001)
     if len(payload)>8_000_000: raise HTTPException(413, "Audio too large")
-    if len(payload)<200: raise HTTPException(422, "Audio too short")
+    if len(payload)<200:
+        log.warning("Voice note rejected: %d bytes (%s)", len(payload), file.content_type)
+        raise HTTPException(422, "Audio too short")
     with tempfile.TemporaryDirectory() as td:
         source = pathlib.Path(td) / 'voice-note.input'
         target = pathlib.Path(td) / 'voice-note.wav'
@@ -440,6 +456,8 @@ async def transcribe_voice_note(file: UploadFile = File(...), user: str = Depend
         except (OSError, subprocess.TimeoutExpired):
             raise HTTPException(502, "Audio conversion unavailable")
         if result.returncode != 0 or not target.exists():
+            log.warning("Voice note decode failed (%s, %d bytes): %s", file.content_type, len(payload),
+                        result.stderr.decode("utf-8", "replace")[:200])
             raise HTTPException(422, "Unable to decode voice note")
         wav = target.read_bytes()
         if len(wav)>2_100_000: raise HTTPException(413, "Converted audio too large")
@@ -455,12 +473,15 @@ async def transcribe_voice_note(file: UploadFile = File(...), user: str = Depend
             text=response.json().get('text','')
     except (httpx.HTTPError,ValueError) as exc:
         raise HTTPException(502, f"STT service unavailable ({type(exc).__name__})") from exc
-    if not isinstance(text,str) or not text.strip(): raise HTTPException(422,"Could not recognize speech")
+    if not isinstance(text,str) or not text.strip():
+        log.warning("Voice note had no recognizable speech (%d bytes in, %.1fs audio, STT language=uz)",
+                    len(payload), len(wav) / 32000)
+        raise HTTPException(422,"Could not recognize speech")
     return {'text':text.strip(),'language':'uz','duration_limited_seconds':60}
 
 class RoomRequest(BaseModel):
-    model: Literal["sayro", "navoiy"] = "sayro"
-    persona: Literal["john", "daniyar", "leila", "leyla", "sofia"] = "daniyar"
+    model: Literal["sayro", "navoiy"] = "navoiy"
+    persona: PersonaId = DEFAULT_PERSONA
     language: Literal["uz", "ru", "en"] = "uz"
     conversation_id: str = Field(min_length=1, max_length=64)
     text_only: bool = False
@@ -516,9 +537,9 @@ async def create_room(body: RoomRequest, user: str = Depends(mutation_auth)):
 from . import preferences
 
 class UIUserPreferences(BaseModel):
-    persona_id: Literal['john','daniyar','leila','leyla','sofia'] = 'john'
+    persona_id: PersonaId = DEFAULT_PERSONA
     language: Literal['auto','uz','ru','en'] = 'auto'
-    tts_model: Literal['sayro','navoiy'] = 'sayro'
+    tts_model: Literal['sayro','navoiy'] = 'navoiy'
     voice_enabled: bool = True
     rate: float = Field(default=1,ge=0.5,le=2)
     pitch: float = Field(default=1,ge=0.5,le=2)

@@ -22,7 +22,8 @@ HEADERS={'X-Voice-UI':'1'}
 def test_personas_and_language_truthfulness(client):
     r=client.get('/api/experience')
     assert r.status_code==200
-    assert {x['id'] for x in r.json()['personas']}=={'john','daniyar','leila','leyla','sofia'}
+    assert {x['id'] for x in r.json()['personas']}=={'sofiya','malika','dilnoza','zarina'}
+    assert all(x['voice_gender']=='female' for x in r.json()['personas'])
     assert next(x for x in r.json()['languages'] if x['code']=='ru')['voice_input_supported'] is False
     assert 'warm' not in str(r.json()).lower() or True
     assert 'do anything' not in agent_instructions('leyla','uz','Respond accurately')

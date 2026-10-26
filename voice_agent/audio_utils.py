@@ -70,6 +70,25 @@ def split_long_phrase(text: str, max_chars: int) -> list[str]:
     return chunks
 
 
+def split_for_fast_start(text: str, max_chars: int, first_max: int = 40) -> list[str]:
+    """Like split_long_phrase, but a short leading sentence/clause becomes its own phrase.
+
+    The TTS pod releases audio only after its first ~4 s chunk is synthesized, so a short
+    first request gets the first sound out sooner; the rest is packed as usual.
+    """
+    text = " ".join(text.split())
+    if not text:
+        return []
+    head = ""
+    for piece in (_SENTENCE_END.split(text, maxsplit=1)[0], _CLAUSE_END.split(text, maxsplit=1)[0]):
+        if 8 <= len(piece) <= first_max and len(piece) < len(text):
+            head = piece
+            break
+    if not head:
+        return split_long_phrase(text, max_chars)
+    return [head, *split_long_phrase(text[len(head):].strip(), max_chars)]
+
+
 def trim_pcm_edges(raw: bytes, *, threshold: int = 450, sample_rate: int = 24000) -> bytes:
     """Trim leading/trailing low-amplitude frames; preserve natural pauses.
 

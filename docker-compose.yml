@@ -5,16 +5,16 @@ services:
     restart: unless-stopped
     init: true
     env_file: .env
-    environment: {AGENT_CONFIG_PATH: /app/config/agent.yaml}
-    volumes: ["./config:/app/config:ro", "./knowledge:/app/knowledge:ro"]
+    environment: {AGENT_CONFIG_PATH: /app/config/agent.yaml, AGENT_RECORDS_DB_PATH: /app/data/agent_records.sqlite3}
+    volumes: ["./config:/app/config:ro", "./knowledge:/app/knowledge:ro", "./agents:/app/agents:ro", "conversation_data:/app/data"]
     command: ["python", "-m", "voice_agent.worker", "start"]
   api:
     build: .
     restart: unless-stopped
     init: true
     env_file: .env
-    environment: {AGENT_CONFIG_PATH: /app/config/agent.yaml}
-    volumes: ["./config:/app/config:rw", "./knowledge:/app/knowledge:ro", "conversation_data:/app/data"]
+    environment: {AGENT_CONFIG_PATH: /app/config/agent.yaml, CONVERSATIONS_DB_PATH: /app/data/neurotech-conversations.sqlite3}
+    volumes: ["./config:/app/config:rw", "./knowledge:/app/knowledge:ro", "./agents:/app/agents:ro", "conversation_data:/app/data"]
     ports: ["127.0.0.1:8090:8090"]
     command: ["uvicorn", "voice_agent.admin:app", "--host", "0.0.0.0", "--port", "8090", "--workers", "1"]
 volumes:

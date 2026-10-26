@@ -11,7 +11,17 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-DB_PATH = Path(os.getenv('CONVERSATIONS_DB_PATH', '/tmp/neurotech-conversations.sqlite3'))
+def _default_db_path() -> str:
+    # History must survive container re-creation: use the persistent data volume when it is mounted.
+    data = Path('/app/data')
+    if data.is_dir() and os.access(data, os.W_OK):
+        return str(data / 'neurotech-conversations.sqlite3')
+    return '/tmp/neurotech-conversations.sqlite3'
+
+
+DB_PATH = Path(os.getenv('CONVERSATIONS_DB_PATH', _default_db_path()))
+NEW_TITLE = 'Yangi suhbat'
+LEGACY_TITLES = ('Новый разговор', NEW_TITLE)
 
 @contextmanager
 def database():
@@ -33,6 +43,9 @@ def database():
       final INTEGER NOT NULL DEFAULT 1, created_at REAL NOT NULL,
       PRIMARY KEY (conversation_id, id)
     )''')
+    if 'kind' not in {row[1] for row in con.execute('PRAGMA table_info(conversations)')}:
+        # chat and call transcripts are separate conversations; older rows were all chats
+        con.execute("ALTER TABLE conversations ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'")
     con.execute('CREATE INDEX IF NOT EXISTS idx_conversations_owner ON conversations(owner,updated_at DESC)')
     try:
       yield con
@@ -47,15 +60,15 @@ def list_items(owner: str):
               FROM conversations c WHERE owner=? ORDER BY updated_at DESC LIMIT 150''', (owner,))]
 
 
-def create(owner: str, persona: str, language: str, model: str):
+def create(owner: str, persona: str, language: str, model: str, kind: str = 'chat'):
     now = time.time()
-    item = {'id': uuid.uuid4().hex, 'owner': owner, 'title': 'Новый разговор',
-            'persona': persona, 'language': language, 'tts_model': model,
+    item = {'id': uuid.uuid4().hex, 'owner': owner, 'title': NEW_TITLE,
+            'persona': persona, 'language': language, 'tts_model': model, 'kind': kind if kind in ('chat', 'call') else 'chat',
             'created_at': now, 'updated_at': now, 'call_seconds': 0}
     with database() as c:
         c.execute('''INSERT INTO conversations
-                 (id,owner,title,persona,language,tts_model,created_at,updated_at,call_seconds)
-                 VALUES (:id,:owner,:title,:persona,:language,:tts_model,:created_at,:updated_at,:call_seconds)''', item)
+                 (id,owner,title,persona,language,tts_model,kind,created_at,updated_at,call_seconds)
+                 VALUES (:id,:owner,:title,:persona,:language,:tts_model,:kind,:created_at,:updated_at,:call_seconds)''', item)
     return item
 
 
@@ -80,7 +93,7 @@ def append(owner: str, item_id: str, msg_id: str, role: str, kind: str, text: st
                   (msg_id,item_id,role,kind,text,int(final),now))
         if role=='user' and len(text)>8:
             title=c.execute('SELECT title FROM conversations WHERE id=?',(item_id,)).fetchone()[0]
-            if title == 'Новый разговор':
+            if title in LEGACY_TITLES:
                 c.execute('UPDATE conversations SET title=? WHERE id=?', (text[:75], item_id))
         c.execute('UPDATE conversations SET updated_at=? WHERE id=?',(now,item_id))
         return True

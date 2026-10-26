@@ -36,9 +36,13 @@ def build_tts(config: dict[str, Any], *, model_override: str | None = None):
         model = model_override or spec.get("model", "sayro")
         provider = DualGatewayTTS(
             url=spec["url"], api_key=credential(spec, required=True), model=model,
-            emotion=spec.get("emotion", "calm"), voice=spec.get("voice", "sayro"),
+            emotion=spec.get("emotion", "calm"),
+            # Gateway voices are named after their model; a per-room model override must not
+            # inherit the configured model's voice (sayro + voice=navoiy is rejected with 502).
+            voice=spec.get("voice", model) if model == spec.get("model", "sayro") else model,
             timeout_seconds=float(spec.get("timeout_seconds", 120)),
             max_audio_seconds=float(spec.get("max_audio_seconds", 35)),
+            transport=spec.get("transport", "http"),
             max_chars_per_request=int(spec.get("max_chars_per_request", 180)),
         )
         return tts.StreamAdapter(
