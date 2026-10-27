@@ -25,6 +25,7 @@ python scripts/bench_latency.py -n 4      # per-stage latency
 | `docs/04_ORCHESTRATOR_WIRING.md` | connect everything, acceptance checklist |
 | `docs/05_DUAL_GATEWAY_FRONTEND.md` | UI and gateway notes |
 | `docs/06_AGENTS.md` | agent prompts, tools and business rules (`agents/`) |
+| `docs/09_NGINX_PUBLIC.md` | publish the orchestrator and UI on one domain with nginx (`deploy/nginx/orchestrator.conf`) |
 | `docs/07_NAVOIY_FIRST_AUDIO_FIX.md` | fix for the slow first audio on the TTS pod (hop-length reset), with the patch to paste |
 
 - API: port 8090 on localhost; expose it through a trusted reverse proxy.
@@ -42,3 +43,4 @@ python scripts/bench_latency.py -n 4      # per-stage latency
 | `docs/uz/01_GIGAAM_STT_RUNPOD.md` | STT pod |
 | `docs/uz/02_GEMMA_4_31B_VLLM.md` | LLM pod |
 | `docs/uz/08_UI_ULASH.md` | **orchestrator'ni UI bilan ulash**: lokal, Docker, ngrok, kirish qoidalari, xatolar |
+| `docs/uz/09_NGINX_PUBLIC.md` | **orchestrator'ni nginx bilan internetga ochish** (`deploy/nginx/orchestrator.conf`) |
