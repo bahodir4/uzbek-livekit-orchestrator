@@ -4,10 +4,10 @@ Ikki domen, ikkita konfiguratsiya fayli:
 
 | Domen | Nima | Fayl |
 |---|---|---|
-| `api-voice.backend.uz` | orchestrator **API** (faqat API, sahifalar yo'q) | `deploy/nginx/orchestrator.conf` |
+| `api-voice.neurotech.uz` | orchestrator **API** (faqat API, sahifalar yo'q) | `deploy/nginx/orchestrator.conf` |
 | `voice.neurotech.uz` | mijoz **UI** + `/api/` ni API domeniga yo'naltiradi | `deploy/nginx/ui-domain.conf` |
 
-Brauzer faqat `voice.neurotech.uz` bilan gaplashadi. Kirish cookie'si `SameSite=Strict`, shuning uchun brauzer UI va `/api` ni **bir domenda** ko'rishi shart: `voice.neurotech.uz` serveri `/api/` ni `https://api-voice.backend.uz` ga o'zi (serverdan serverga) uzatadi. Ikkala domen bitta serverda bo'lishi ham mumkin.
+Brauzer faqat `voice.neurotech.uz` bilan gaplashadi. Kirish cookie'si `SameSite=Strict`, shuning uchun brauzer UI va `/api` ni **bir domenda** ko'rishi shart: `voice.neurotech.uz` serveri `/api/` ni `https://api-voice.neurotech.uz` ga o'zi (serverdan serverga) uzatadi. Ikkala domen bitta serverda bo'lishi ham mumkin.
 
 ## Nima qiladi
 
@@ -23,19 +23,19 @@ Brauzer faqat `voice.neurotech.uz` bilan gaplashadi. Kirish cookie'si `SameSite=
 
 ## 1. DNS
 
-Ikki **A-yozuv** qo'shing: `api-voice.backend.uz` → API serveri IP'si, `voice.neurotech.uz` → UI serveri IP'si (`backend.uz` hozir `167.235.222.200` ga qaraydi). Tekshirish: `nslookup api-voice.backend.uz`, `nslookup voice.neurotech.uz`. Yozuvlar tarqalmaguncha sertifikat olinmaydi. Brandmauer: faqat **80 va 443** ochiq (8090 ni ochmang; `docker-compose.yml` uni faqat `127.0.0.1` ga e'lon qiladi).
+Ikki **A-yozuv** qo'shing: `api-voice.neurotech.uz` → API serveri IP'si, `voice.neurotech.uz` → UI serveri IP'si. Tekshirish: `nslookup api-voice.neurotech.uz`, `nslookup voice.neurotech.uz`. Yozuvlar tarqalmaguncha sertifikat olinmaydi. Brandmauer: faqat **80 va 443** ochiq (8090 ni ochmang; `docker-compose.yml` uni faqat `127.0.0.1` ga e'lon qiladi).
 
-## 2. API serveri (`api-voice.backend.uz`)
+## 2. API serveri (`api-voice.neurotech.uz`)
 
 ```bash
 docker compose up -d --build                              # API: 127.0.0.1:8090
 sudo apt install -y nginx certbot
 sudo ufw allow 80,443/tcp                                  # ufw yoqilgan bo'lsa
 sudo systemctl stop nginx
-sudo certbot certonly --standalone -d api-voice.backend.uz  # DNS yozuvi bo'lishi va 80-port internetdan ochiq bo'lishi kerak
+sudo certbot certonly --standalone -d api-voice.neurotech.uz  # DNS yozuvi bo'lishi va 80-port internetdan ochiq bo'lishi kerak
 sudo cp deploy/nginx/orchestrator.conf /etc/nginx/conf.d/orchestrator.conf   # FAQAT sertifikat olingandan KEYIN (konfiguratsiya uning fayllarini talab qiladi)
 sudo nginx -t && sudo systemctl start nginx
-curl -s https://api-voice.backend.uz/health/live          # {"status":"alive"}
+curl -s https://api-voice.neurotech.uz/health/live          # {"status":"alive"}
 ```
 
 UI serveri API serveriga murojaat qilganda API serveri hamma so'rovni UI serverining manzilidan ko'radi. Cheklovlar real foydalanuvchilarni sanashi uchun `orchestrator.conf` dagi ikki qatorni oching va `UI_SERVER_IP` ni UI serverining IP'siga almashtiring:
@@ -75,7 +75,7 @@ Sertifikat avtomatik yangilanishi uchun: `sudo systemctl enable --now certbot.ti
 | `ADMIN_PASSWORD` | uzun va noyob (≥ 16 belgi) |
 | `LIVEKIT_URL` | brauzerdan ochiladigan `wss://...` manzil |
 | Almashtirilgan kalitlar | chatga yoki skrinshotga tushgan hamma kalitni yangilang |
-| `curl -sI https://api-voice.backend.uz/docs` | `403` qaytarishi kerak |
+| `curl -sI https://api-voice.neurotech.uz/docs` | `403` qaytarishi kerak |
 
 ## Eslatmalar
 

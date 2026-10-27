@@ -4,10 +4,10 @@ Two domains, two config files:
 
 | Domain | What | File |
 |---|---|---|
-| `api-voice.backend.uz` | orchestrator **API** only (no pages) | `deploy/nginx/orchestrator.conf` |
+| `api-voice.neurotech.uz` | orchestrator **API** only (no pages) | `deploy/nginx/orchestrator.conf` |
 | `voice.neurotech.uz` | customer **UI** + forwards `/api/` to the API domain | `deploy/nginx/ui-domain.conf` |
 
-Browsers only talk to `voice.neurotech.uz`. The login cookie is `SameSite=Strict`, so the browser must see UI and `/api` on one domain: the UI server forwards `/api/` to `https://api-voice.backend.uz` server to server. Both domains may share one machine.
+Browsers only talk to `voice.neurotech.uz`. The login cookie is `SameSite=Strict`, so the browser must see UI and `/api` on one domain: the UI server forwards `/api/` to `https://api-voice.neurotech.uz` server to server. Both domains may share one machine.
 
 | Part | What it does |
 |---|---|
@@ -20,7 +20,7 @@ Browsers only talk to `voice.neurotech.uz`. The login cookie is `SameSite=Strict
 
 ## 1. DNS
 
-A record for `api-voice.backend.uz` → API server IP, and for `voice.neurotech.uz` → UI server IP (`backend.uz` itself resolves to `167.235.222.200`). Check with `nslookup`. Certificates cannot be issued before the records exist. Firewall: only ports 80 and 443.
+A record for `api-voice.neurotech.uz` → API server IP, and for `voice.neurotech.uz` → UI server IP. Check with `nslookup`. Certificates cannot be issued before the records exist. Firewall: only ports 80 and 443.
 
 ## 2. API server
 
@@ -29,10 +29,10 @@ docker compose up -d --build                              # API on 127.0.0.1:809
 sudo apt install -y nginx certbot
 sudo ufw allow 80,443/tcp                                  # if ufw is active
 sudo systemctl stop nginx
-sudo certbot certonly --standalone -d api-voice.backend.uz  # needs the DNS record, and port 80 reachable from the internet
+sudo certbot certonly --standalone -d api-voice.neurotech.uz  # needs the DNS record, and port 80 reachable from the internet
 sudo cp deploy/nginx/orchestrator.conf /etc/nginx/conf.d/orchestrator.conf   # ONLY after the certificate exists (the config needs its files)
 sudo nginx -t && sudo systemctl start nginx
-curl -s https://api-voice.backend.uz/health/live
+curl -s https://api-voice.neurotech.uz/health/live
 ```
 
 Requests from the UI server arrive from its address. So that limits here count real users, uncomment `set_real_ip_from UI_SERVER_IP;` and `real_ip_header X-Forwarded-For;` in `orchestrator.conf` and put the UI server's IP in.
@@ -62,6 +62,6 @@ Renew certificates with `sudo systemctl enable --now certbot.timer`.
 
 - API server `.env`: **`UI_SECURE_COOKIE=true`** (it may be `false` locally; then the login cookie has no `Secure` flag). After changing: `docker compose up -d --force-recreate api`.
 - `ADMIN_PASSWORD` long and unique (≥ 16 characters); `LIVEKIT_URL` a `wss://` address reachable from browsers; rotate any key that appeared in a chat or screenshot.
-- `curl -sI https://api-voice.backend.uz/docs` must answer `403`.
+- `curl -sI https://api-voice.neurotech.uz/docs` must answer `403`.
 
 Tested (throw-away certificates, against the running API): syntax of both files (nginx 1.31), UI and static files, `/api` forwarding, login cookie, creating a conversation through the UI domain, the login rate limit on the UI domain (`429`), `/` → `404` on the API domain. Not tested with real certificates and domains.
