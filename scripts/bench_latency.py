@@ -173,6 +173,8 @@ async def bench_stt(session, specs, n, text):
                 ready = await ws.receive_json()
                 connects.append(time.perf_counter() - t0)
                 end_sent = None
+                silence = b"\x00" * (640 * 2)
+                done = asyncio.Event()
                 async def sender():
                     nonlocal end_sent
                     step = 640 * 2
@@ -180,7 +182,13 @@ async def bench_stt(session, specs, n, text):
                         await ws.send_bytes(pcm16[i:i + step])
                         await asyncio.sleep(0.02)
                     end_sent = time.perf_counter()
-                    await asyncio.sleep(1.5)      # trailing silence, as in a real call
+                    # Real trailing silence, paced like a live call, so the server detects the end of speech
+                    # itself (no "end" message). The measurement starts when the speech stops.
+                    for _ in range(200):
+                        if done.is_set():
+                            return
+                        await ws.send_bytes(silence)
+                        await asyncio.sleep(0.02)
                     await ws.send_json({"type": "end"})
                 task = asyncio.create_task(sender())
                 async with asyncio.timeout(20):
@@ -189,6 +197,7 @@ async def bench_stt(session, specs, n, text):
                             ev = json.loads(m.data)
                             if ev.get("type") == "final_transcript" and end_sent:
                                 finals.append(time.perf_counter() - end_sent)
+                                done.set()
                                 break
                 task.cancel()
         except Exception as exc:

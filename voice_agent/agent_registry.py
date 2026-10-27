@@ -50,6 +50,7 @@ class Registry:
     tool_descriptions: dict[str, str]
     messages: dict[str, Any]
     settings: dict[str, Any]
+    phrases: dict[str, list[str]]
 
     def text(self, path: str, **values: Any) -> str:
         """Message by dotted path, e.g. text('results.loan_annuity', monthly=...)."""
@@ -151,7 +152,12 @@ def load(directory: Path | None = None) -> Registry:
                                      tools=agent_tools, instructions=prompt.strip())
 
     directory_lines = "\n".join(f"- {a.name}: {a.role} ({'; '.join(a.tasks)})" for a in agents.values())
-    shared = _read(root, "shared_rules.md").format(directory=directory_lines).strip()
+    phrases = {}
+    if (root / "phrases.yaml").exists():
+        raw = _read(root, "phrases.yaml") or {}
+        phrases = {k: [str(x).strip() for x in v if str(x).strip()] for k, v in raw.items() if isinstance(v, list)}
+    fillers_text = "; ".join(f'"{x}"' for x in phrases.get("fillers", [])) or '"Bir soniya."'
+    shared = _read(root, "shared_rules.md").format(directory=directory_lines, fillers=fillers_text).strip()
     agents = {k: AgentSpec(**{**a.__dict__, "instructions": f"{a.instructions}\n{shared}"}) for k, a in agents.items()}
 
     aliases = index.get("legacy_aliases") or {}
@@ -161,7 +167,7 @@ def load(directory: Path | None = None) -> Registry:
     locales = _need(index, "locale_instructions", dict, "index.yaml")
     return Registry(default=default, agents=agents, legacy_aliases=dict(aliases), locale_instructions=locales,
                     guard_instruction=_need(index, "guard_instruction", str, "index.yaml"),
-                    tool_descriptions=tool_descriptions, messages=messages, settings=settings)
+                    tool_descriptions=tool_descriptions, messages=messages, settings=settings, phrases=phrases)
 
 
 @functools.lru_cache(maxsize=1)

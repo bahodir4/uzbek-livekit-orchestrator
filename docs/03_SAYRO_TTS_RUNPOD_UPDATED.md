@@ -1,5 +1,7 @@
 # 03 — Sayro TTS on RunPod (fresh installation and later restart)
 
+> **Optional.** The default voice is Navoiy; see `03_NAVOIY_TTS_RUNPOD.md` and `00_QUICKSTART.md`. Install Sayro only if you want it behind the same gateway (the TTS repo has `scripts/install_sayro_fresh.sh`; its installer is only dry-run tested). The model is gated on Hugging Face.
+
 **Service:** `uzlm/sayro-tts-1.7B` · **Port:** `8000` · **Stack:** vLLM 0.30.0 + vLLM-Omni 0.30.0 · **Purpose:** Uzbek TTS for the LiveKit orchestrator.
 
 > This is a reproducible operations guide for the environment used in October 2026, not a guarantee that future upstream releases have identical APIs. Pin and verify package versions before production deployment.

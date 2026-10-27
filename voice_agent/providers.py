@@ -31,7 +31,6 @@ def build_llm(config: dict[str, Any]):
 def build_tts(config: dict[str, Any], *, model_override: str | None = None):
     spec = active_spec(config, "tts")
     if spec["type"] == "dual_gateway_stream":
-        from livekit.agents import tts, tokenize
         from .adapters.dual_tts import DualGatewayTTS
         model = model_override or spec.get("model", "sayro")
         provider = DualGatewayTTS(
@@ -43,12 +42,17 @@ def build_tts(config: dict[str, Any], *, model_override: str | None = None):
             timeout_seconds=float(spec.get("timeout_seconds", 120)),
             max_audio_seconds=float(spec.get("max_audio_seconds", 35)),
             transport=spec.get("transport", "http"),
+            prefetch_phrases=int(spec.get("prefetch_phrases", 2)),
+            phrase_cache=bool(spec.get("phrase_cache", True)),
+            greeting_emotion=spec.get("greeting_emotion"),
             max_chars_per_request=int(spec.get("max_chars_per_request", 180)),
         )
-        return tts.StreamAdapter(
-            tts=provider,
-            sentence_tokenizer=tokenize.blingfire.SentenceTokenizer(retain_format=True),
-        )
+        if spec.get("input_streaming", True):
+            return provider      # streaming input (see DualGatewayTTS.stream): it tokenizes the LLM text itself
+        # Fallback switch (input_streaming: false): LiveKit's sentence-by-sentence adapter, as before.
+        from livekit.agents import tts as lk_tts
+        from .tokenizers import FastSentenceTokenizer
+        return lk_tts.StreamAdapter(tts=provider, sentence_tokenizer=FastSentenceTokenizer())
     if model_override is not None:
         raise ValueError("Per-room model overrides require dual_gateway_stream")
     if spec["type"] == "sayro_http":

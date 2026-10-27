@@ -180,14 +180,39 @@ async def entrypoint(ctx: JobContext) -> None:
     try:
         await session.start(
             room=ctx.room, agent=agent,
+            # LiveKit Cloud session recording/telemetry runs inside this process (audio recorder, OTLP exports) and
+            # stalls the event loop for 100-400 ms; it is off unless agent.record_session is set to true.
+            record=bool(config["agent"].get("record_session", False)),
             room_options=room_io.RoomOptions(text_input=True, text_output=True,
                 audio_input=not text_only, audio_output=speak_responses and not text_only),
         )
         if config["agent"].get("auto_greet", True) and not text_only:
-            await session.say(PERSONAS[persona]["greeting"], allow_interruptions=True)
+            await say_greeting(session, tts_provider, PERSONAS[persona]["greeting"])
     except Exception:
         log.exception("LiveKit room session failed")
         raise
+
+
+async def say_greeting(session, tts_provider, greeting: str) -> None:
+    """Play the pre-rendered greeting instantly; without a cache entry synthesize it live and cache it for next time."""
+    import asyncio
+    from . import greeting_cache
+    from .adapters.dual_tts import DualGatewayTTS
+    gateway = tts_provider if isinstance(tts_provider, DualGatewayTTS) else getattr(tts_provider, "_wrapped_tts", None)
+    if not isinstance(gateway, DualGatewayTTS):
+        await session.say(greeting, allow_interruptions=True)
+        return
+    emotion = gateway.greeting_emotion or gateway.emotion
+    pcm = greeting_cache.load(greeting_cache.cache_path(gateway.selected_model, gateway.voice, emotion, greeting))
+    if pcm:
+        await session.say(greeting, audio=greeting_cache.frames(pcm), allow_interruptions=True)
+        return
+    await session.say(greeting, allow_interruptions=True)
+
+    async def fill_later() -> None:
+        await asyncio.sleep(15)                       # stay out of the way of the first real reply
+        await greeting_cache.fill(gateway, greeting, emotion)
+    asyncio.ensure_future(fill_later())
 
 
 if __name__ == "__main__":

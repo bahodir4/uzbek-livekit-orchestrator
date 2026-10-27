@@ -1,15 +1,19 @@
 {
 	"folders": [
 		{
+			"name": "uzbek-livekit-orchestrator",
 			"path": "."
 		},
 		{
+			"name": "uzbek-dual-tts-backend",
 			"path": "../uzbek-dual-tts-backend"
 		},
 		{
+			"name": "neurotech-conversation-ui",
 			"path": "../neurotech-conversation-ui"
 		},
 		{
+			"name": "gigaam-livekit-stt",
 			"path": "../gigaam-livekit-stt"
 		}
 	],

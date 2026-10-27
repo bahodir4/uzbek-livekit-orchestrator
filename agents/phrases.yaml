@@ -1,0 +1,15 @@
+# Short fixed phrases the agents say again and again. They are rendered ONCE with the real voice
+# (python -m voice_agent.greeting_cache) and then played from disk: no TTS delay.
+# The prompt tells the model to use the fillers word for word, so they hit the cache.
+fillers:                      # said right before a tool call, while the tool runs
+  - "Hozir hisoblab beraman."
+  - "Bir soniya, tekshiraman."
+  - "Hozir bo'sh vaqtlarni ko'raman."
+  - "Hozir murojaatni ro'yxatga olaman."
+  - "Hozir tekshirib ko'raman."
+closers:                      # end of a call
+  - "Rahmat, yaxshi kun tilayman."
+  - "Yana savolingiz bo'lsa, murojaat qiling."
+other:
+  - "Kechirasiz, tushunmadim. Takrorlab bera olasizmi?"
+  - "Bir daqiqa, iltimos."

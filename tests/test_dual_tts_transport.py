@@ -119,9 +119,10 @@ def test_http_transport_unchanged(gateway):
         app, runner, url = await gateway()
         t = DualGatewayTTS(url=url, api_key="k", model="navoiy", voice="navoiy")
         try:
-            t.prewarm()                                                     # no-op for http
+            t.prewarm()                                                     # http: one tiny warm-up request
             assert await collect(t, "Salom.") == PCM
-            assert app["ws_auth"] == [] and app["http_texts"] == ["Salom."]
+            await asyncio.sleep(0.2)
+            assert app["ws_auth"] == [] and sorted(app["http_texts"]) == ["Ha.", "Salom."]
         finally:
             await t.aclose()
             await runner.cleanup()

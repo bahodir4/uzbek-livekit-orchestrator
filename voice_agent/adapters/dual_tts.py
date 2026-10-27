@@ -34,14 +34,15 @@ class DualGatewayTTS(tts.TTS):
     def __init__(self, *, url: str, api_key: str, model: str = "sayro",
                  emotion: str = "calm", voice: str = "sayro",
                  timeout_seconds: float = 120, max_audio_seconds: float = 35,
-                 max_chars_per_request: int = 180, transport: str = "http"):
+                 max_chars_per_request: int = 180, transport: str = "http",
+                 prefetch_phrases: int = 2, phrase_cache: bool = True, greeting_emotion: str | None = None):
         if model not in MODELS:
             raise ValueError("Unsupported model: use sayro or navoiy")
         if transport not in TRANSPORTS:
             raise ValueError("transport must be 'http' or 'ws'")
         if not (32 <= max_chars_per_request <= 350):
             raise ValueError("max_chars_per_request must be between 32 and 350")
-        super().__init__(capabilities=tts.TTSCapabilities(streaming=False),
+        super().__init__(capabilities=tts.TTSCapabilities(streaming=True),
                          sample_rate=SAMPLE_RATE, num_channels=1)
         base = url.rstrip("/")
         self.url = base + "/v1/tts/stream"
@@ -54,6 +55,11 @@ class DualGatewayTTS(tts.TTS):
         self.max_audio_seconds = max_audio_seconds
         self.max_chars_per_request = max_chars_per_request
         self.transport = transport
+        self.prefetch_phrases = max(1, int(prefetch_phrases))
+        self.phrase_cache = bool(phrase_cache)
+        self.greeting_emotion = greeting_emotion or None     # None: same emotion as everything else
+        from ..tokenizers import FastSentenceTokenizer
+        self.text_tokenizer = FastSentenceTokenizer(max_chars=max_chars_per_request)
         self._session: aiohttp.ClientSession | None = None
         self._lock = asyncio.Lock()
         self._ws_idle: list[aiohttp.ClientWebSocketResponse] = []
@@ -119,8 +125,25 @@ class DualGatewayTTS(tts.TTS):
             log.warning("TTS websocket prewarm failed (%s); using HTTP", type(exc).__name__)
 
     def prewarm(self) -> None:
-        if self.transport == "ws" and not self._closed:
+        if self._closed:
+            return
+        if self.transport == "ws":
             asyncio.ensure_future(self._warm_ws())
+        else:
+            asyncio.ensure_future(self._warm_http())
+
+    async def _warm_http(self) -> None:
+        """One tiny synthesis at session start: opens the pooled connection (TLS through the proxy) and touches the
+        pod path, so the first spoken reply does not pay for a cold connection. Audio is discarded; failures are ignored."""
+        try:
+            payload = {"model": self.selected_model, "text": "Ha.", "emotion": self.emotion, "voice": self.voice}
+            started = time.monotonic()
+            async with contextlib.aclosing(self._pcm_http(payload)) as chunks:
+                async for _ in chunks:
+                    pass
+            log.info("TTS warm-up done in %.2fs", time.monotonic() - started)
+        except Exception as exc:  # never break a call because of a warm-up
+            log.info("TTS warm-up skipped: %s", exc)
 
     async def _pcm_ws(self, payload: dict, ws: aiohttp.ClientWebSocketResponse) -> AsyncIterator[bytes]:
         clean = False
@@ -207,12 +230,179 @@ class DualGatewayTTS(tts.TTS):
         await super().aclose()
 
 
+    def stream(self, *, conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS) -> "_PCMSynthesizeStream":
+        """Text streamed in from the LLM; the next piece is requested while the current one is still arriving."""
+        return _PCMSynthesizeStream(tts_instance=self, conn_options=conn_options)
+
+
+async def fetch_phrase(gateway: "DualGatewayTTS", model: str, phrase: str, out: "asyncio.Queue", *, last: bool = True) -> None:
+    """Download one phrase into ``out`` as PCM16 bytes chunks. ``None`` ends it (when ``last``); an Exception is delivered in order."""
+    payload = {"model": model, "text": phrase, "emotion": gateway.emotion, "voice": gateway.voice}
+    cache_file = None
+    if gateway.phrase_cache and len(phrase) <= PHRASE_CACHE_MAX_CHARS:
+        from .. import greeting_cache
+        cache_file = greeting_cache.cache_path(model, gateway.voice, gateway.emotion, phrase)
+        hit = greeting_cache.load(cache_file)
+        if hit:                                       # a phrase the agent already said before: no TTS request at all
+            for i in range(0, len(hit), 3840):
+                out.put_nowait(hit[i:i + 3840])
+            if last:
+                out.put_nowait(None)
+            log.info("TTS cache hit (%d chars): %r", len(phrase), phrase[:40])
+            return
+    produced = bytearray() if cache_file else None
+    remainder = b""
+    # Speech is ~15 chars/s; far more audio than the text can hold means the model
+    # looped. Cut that phrase off (closing the stream aborts server generation)
+    # instead of failing the whole reply.
+    phrase_limit = int(max(4.0, 0.16 * len(phrase)) * SAMPLE_RATE * 2)
+    phrase_bytes = 0
+    try:
+        async with contextlib.aclosing(gateway.pcm_chunks(payload)) as chunks:
+            async for chunk in chunks:
+                remainder += chunk
+                n = len(remainder) & ~1  # 16-bit samples; chunks can split mid-sample
+                if not n:
+                    continue
+                runaway = phrase_bytes + n > phrase_limit
+                if runaway:
+                    n = max(0, phrase_limit - phrase_bytes) & ~1
+                if n:
+                    out.put_nowait(remainder[:n])
+                    phrase_bytes += n
+                    if produced is not None:
+                        produced += remainder[:n]
+                remainder = remainder[n:]
+                if runaway:
+                    log.warning("TTS runaway cut at %.1fs for %d-char phrase: %r",
+                                phrase_bytes / (2 * SAMPLE_RATE), len(phrase), phrase)
+                    remainder = b""
+                    break
+        if remainder:
+            raise ValueError("TTS gateway returned incomplete PCM16 sample")
+        if produced and not runaway_hit(phrase, phrase_bytes):
+            greeting_cache.store(cache_file, bytes(produced))     # complete, sane audio: keep it for next time
+        if last:
+            out.put_nowait(None)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # delivered to the consumer, in order
+        out.put_nowait(exc)
+        raise _Delivered from exc
+
+
+PHRASE_CACHE_MAX_CHARS = 160
+
+
+def runaway_hit(phrase: str, audio_bytes: int) -> bool:
+    """True when the audio is far longer than the text can hold (a looping model): never cache that."""
+    return audio_bytes / (2 * SAMPLE_RATE) > max(4.0, 0.16 * len(phrase)) * 0.9
+
+
+class _Delivered(Exception):
+    """A failure that was already put on the queue; stops the remaining phrases of the same piece."""
+
+
+class _PCMSynthesizeStream(tts.SynthesizeStream):
+    """Streaming input: LLM text -> early-release tokenizer -> one gateway request per piece, pipelined.
+
+    LiveKit's StreamAdapter asks for the next sentence only after the previous one has fully arrived, so every
+    boundary pays a new request round trip. Here up to ``prefetch_phrases`` pieces are in flight: the next one is
+    requested while the current one is still arriving or playing. Audio is emitted strictly in order and every
+    piece is announced with a timed transcript, as the StreamAdapter does.
+    """
+
+    def __init__(self, *, tts_instance: "DualGatewayTTS", conn_options: APIConnectOptions):
+        super().__init__(tts=tts_instance, conn_options=conn_options)
+        self.gateway = tts_instance
+
+    async def _run(self, output_emitter: tts.AudioEmitter) -> None:
+        from livekit.agents.voice.io import TimedString
+        from ..audio_utils import split_long_phrase
+        gateway = self.gateway
+        model = gateway.selected_model                      # snapshot: a later model change cannot reroute this stream
+        output_emitter.initialize(request_id=uuid.uuid4().hex, sample_rate=SAMPLE_RATE, num_channels=1,
+                                  mime_type="audio/pcm", stream=True)
+        output_emitter.start_segment(segment_id=uuid.uuid4().hex)
+        sentences = gateway.text_tokenizer.stream()
+        in_flight = asyncio.Semaphore(gateway.prefetch_phrases)
+        ordered: asyncio.Queue = asyncio.Queue()
+        tasks: list[asyncio.Task] = []
+
+        async def fetch_piece(phrases: list[str], out: asyncio.Queue) -> None:
+            async with in_flight:
+                try:
+                    for i, phrase in enumerate(phrases):
+                        await fetch_phrase(gateway, model, phrase, out, last=i == len(phrases) - 1)
+                except _Delivered:
+                    return
+
+        async def forward_input() -> None:
+            async for data in self._input_ch:
+                if isinstance(data, self._FlushSentinel):
+                    sentences.flush()
+                else:
+                    self._mark_started()        # LiveKit's TTS metrics (ttfb, duration) are measured from here
+                    sentences.push_text(data)
+            sentences.end_input()
+
+        async def schedule() -> None:
+            async for ev in sentences:
+                text = ev.token
+                if not text.strip():
+                    continue
+                try:
+                    phrases = split_long_phrase(text.strip(), gateway.max_chars_per_request)
+                except ValueError as exc:
+                    out: asyncio.Queue = asyncio.Queue()
+                    out.put_nowait(exc)
+                    ordered.put_nowait((text, out))
+                    continue
+                out = asyncio.Queue()
+                tasks.append(asyncio.create_task(fetch_piece(phrases, out)))
+                ordered.put_nowait((text, out))
+            ordered.put_nowait(None)
+
+        async def emit() -> None:
+            total = 0.0
+            limit = float(gateway.max_audio_seconds)
+            while (entry := await ordered.get()) is not None:
+                text, out = entry
+                output_emitter.push_timed_transcript(TimedString(text=text, start_time=total))
+                while True:
+                    item = await out.get()
+                    if item is None:
+                        break
+                    if isinstance(item, Exception):
+                        raise item
+                    total += len(item) / (2 * SAMPLE_RATE)
+                    if total > limit:
+                        raise ValueError("TTS output exceeded maximum audio duration")
+                    output_emitter.push(item)
+                output_emitter.flush()
+
+        workers = [asyncio.create_task(forward_input()), asyncio.create_task(schedule()), asyncio.create_task(emit())]
+        try:
+            await asyncio.gather(*workers)
+        finally:
+            await sentences.aclose()
+            for task in (*workers, *tasks):
+                task.cancel()
+            await asyncio.gather(*workers, *tasks, return_exceptions=True)
+
+
 class _PCMStream(tts.ChunkedStream):
     def __init__(self, *, tts_instance: DualGatewayTTS, input_text: str,
                  conn_options: APIConnectOptions):
         super().__init__(tts=tts_instance, input_text=input_text, conn_options=conn_options)
         self.gateway = tts_instance
         self.text = input_text
+
+    async def _fetch_phrase(self, model: str, phrase: str, out: "asyncio.Queue") -> None:
+        try:
+            await fetch_phrase(self.gateway, model, phrase, out)
+        except _Delivered:
+            pass
 
     async def _run(self, emitter: tts.AudioEmitter) -> None:
         from ..audio_utils import split_for_fast_start
@@ -223,38 +413,35 @@ class _PCMStream(tts.ChunkedStream):
                            num_channels=1, mime_type="audio/pcm", frame_size_ms=40)
         total = 0
         limit = int(gateway.max_audio_seconds * SAMPLE_RATE * 2)
-        for phrase in split_for_fast_start(self.text, gateway.max_chars_per_request):
-            payload = {"model": model, "text": phrase, "emotion": gateway.emotion,
-                       "voice": gateway.voice}
-            remainder = b""
-            # Speech is ~15 chars/s; far more audio than the text can hold means the model
-            # looped. Cut that phrase off (closing the stream aborts server generation)
-            # instead of failing the whole reply.
-            phrase_limit = int(max(4.0, 0.16 * len(phrase)) * SAMPLE_RATE * 2)
-            phrase_bytes = 0
-            runaway = False
-            async with contextlib.aclosing(gateway.pcm_chunks(payload)) as chunks:
-                async for chunk in chunks:
-                    remainder += chunk
-                    n = len(remainder) & ~1  # 16-bit samples; chunks can split mid-sample
-                    if n:
-                        if phrase_bytes + n > phrase_limit:
-                            n = max(0, phrase_limit - phrase_bytes) & ~1
-                            runaway = True
-                        total += n
-                        if total > limit:
-                            raise ValueError("TTS output exceeded maximum audio duration")
-                        if n:
-                            emitter.push(remainder[:n])
-                            phrase_bytes += n
-                        remainder = remainder[n:]
-                        if runaway:
-                            log.warning("TTS runaway cut at %.1fs for %d-char phrase: %r",
-                                        phrase_bytes / (2 * SAMPLE_RATE), len(phrase), phrase)
-                            remainder = b""
-                            break
-            if remainder:
-                raise ValueError("TTS gateway returned incomplete PCM16 sample")
+        phrases = split_for_fast_start(self.text, gateway.max_chars_per_request)
+        # Pipelined: while phrase i plays, phrase i+1 is already being generated, so there is no
+        # silent gap while the next request travels to the pod and back. Audio is still emitted in order.
+        queues = [asyncio.Queue() for _ in phrases]
+        tasks: list[asyncio.Task] = []
+
+        def start(i: int) -> None:
+            if i < len(phrases) and len(tasks) == i:
+                tasks.append(asyncio.create_task(self._fetch_phrase(model, phrases[i], queues[i])))
+
+        try:
+            for i in range(min(gateway.prefetch_phrases, len(phrases))):
+                start(i)
+            for i in range(len(phrases)):
+                while True:
+                    item = await queues[i].get()
+                    if item is None:
+                        break
+                    if isinstance(item, Exception):
+                        raise item
+                    total += len(item)
+                    if total > limit:
+                        raise ValueError("TTS output exceeded maximum audio duration")
+                    emitter.push(item)
+                start(i + gateway.prefetch_phrases)   # keep `prefetch_phrases` requests in flight
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
         if not total:
             raise ValueError("TTS gateway returned empty audio")
         log.debug("TTS streamed model=%s audio_sec=%.3f", model, total / (2 * SAMPLE_RATE))

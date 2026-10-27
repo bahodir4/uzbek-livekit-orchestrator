@@ -31,8 +31,8 @@ ENABLE_BASE_FALLBACK=true
 GIGAAM_FALLBACK_REPO=ai-sage/GigaAM-Multilingual
 GIGAAM_FALLBACK_REVISION=large_ctc
 GPU_WORKERS=1
-PARTIAL_INTERVAL_MS=850
-END_SILENCE_MS=570
+PARTIAL_INTERVAL_MS=500
+END_SILENCE_MS=380
 HF_HOME=/workspace/gigaam-hf-cache
 ```
 
@@ -84,3 +84,15 @@ bash scripts/runpod/stop.sh
 | High streaming delay | Inspect `PARTIAL_INTERVAL_MS`, queue depth and GPU latency; do not reduce values blindly |
 
 **Security:** Rotate the previously exposed STT and Hugging Face tokens. Never embed the STT key into a public browser application or GitHub repository.
+
+## Defaults and checks for the voice agent
+
+`END_SILENCE_MS=380` and `PARTIAL_INTERVAL_MS=500` are the low-latency defaults used with the orchestrator. Raise `END_SILENCE_MS` if callers are cut off mid-sentence. Measured end of speech to final transcript through the proxy: ≈ 0.6 s (`scripts/bench_latency.py` streams real silence after the speech; WebSocket connect ≈ 0.5–1.2 s, so the worker keeps the stream open).
+
+```bash
+bash scripts/runpod/start-background.sh
+curl -s http://127.0.0.1:8000/health/ready                       # {"ready":true,...}
+tail -f /workspace/gigaam-stt-logs/server.log
+```
+
+`/health/ready` needs `Authorization: Bearer <STT_API_KEY>` when called through the RunPod proxy. See `00_QUICKSTART.md` for the full order.
