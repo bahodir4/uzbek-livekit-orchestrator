@@ -27,9 +27,11 @@ A record for `api-voice.backend.uz` → API server IP, and for `voice.neurotech.
 ```bash
 docker compose up -d --build                              # API on 127.0.0.1:8090 only
 sudo apt install -y nginx certbot
-sudo cp deploy/nginx/orchestrator.conf /etc/nginx/conf.d/orchestrator.conf
-sudo systemctl stop nginx && sudo certbot certonly --standalone -d api-voice.backend.uz && sudo systemctl start nginx
-sudo nginx -t && sudo systemctl reload nginx
+sudo ufw allow 80,443/tcp                                  # if ufw is active
+sudo systemctl stop nginx
+sudo certbot certonly --standalone -d api-voice.backend.uz  # needs the DNS record, and port 80 reachable from the internet
+sudo cp deploy/nginx/orchestrator.conf /etc/nginx/conf.d/orchestrator.conf   # ONLY after the certificate exists (the config needs its files)
+sudo nginx -t && sudo systemctl start nginx
 curl -s https://api-voice.backend.uz/health/live
 ```
 
@@ -40,14 +42,21 @@ Requests from the UI server arrive from its address. So that limits here count r
 ```bash
 sudo apt install -y nginx certbot
 sudo mkdir -p /var/www/certbot /var/www/neurotech-ui
-sudo cp deploy/nginx/ui-domain.conf /etc/nginx/conf.d/ui-domain.conf
-sudo systemctl stop nginx && sudo certbot certonly --standalone -d voice.neurotech.uz && sudo systemctl start nginx
+sudo ufw allow 80,443/tcp                                  # if ufw is active
+sudo systemctl stop nginx
+sudo certbot certonly --standalone -d voice.neurotech.uz
+sudo cp deploy/nginx/ui-domain.conf /etc/nginx/conf.d/ui-domain.conf       # ONLY after the certificate exists
 sudo rsync -a --delete ../in.voice-back-frontend/dist/ /var/www/neurotech-ui/    # `dist/` after `npm run build` in in.voice-back-frontend
-sudo nginx -t && sudo systemctl reload nginx
+sudo nginx -t && sudo systemctl start nginx
 curl -s https://voice.neurotech.uz/api/session
 ```
 
 Renew certificates with `sudo systemctl enable --now certbot.timer`.
+
+## If nginx will not start
+
+- `unknown directive "http2"`: nginx older than 1.25.1 (Ubuntu 24.04 has 1.24). The files in `deploy/nginx/` already use `listen 443 ssl http2;`; on an older copy replace `listen 443 ssl;` by `listen 443 ssl http2;` (and the `[::]` line) and delete the `http2 on;` line.
+- `cannot load certificate ... fullchain.pem`: the certificate was not issued yet. Remove the config (`sudo rm /etc/nginx/conf.d/orchestrator.conf`), start nginx, fix the certificate, then copy the config again.
 
 ## Before going public
 

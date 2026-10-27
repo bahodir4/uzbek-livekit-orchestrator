@@ -30,9 +30,11 @@ Ikki **A-yozuv** qo'shing: `api-voice.backend.uz` → API serveri IP'si, `voice.
 ```bash
 docker compose up -d --build                              # API: 127.0.0.1:8090
 sudo apt install -y nginx certbot
-sudo cp deploy/nginx/orchestrator.conf /etc/nginx/conf.d/orchestrator.conf
-sudo systemctl stop nginx && sudo certbot certonly --standalone -d api-voice.backend.uz && sudo systemctl start nginx
-sudo nginx -t && sudo systemctl reload nginx
+sudo ufw allow 80,443/tcp                                  # ufw yoqilgan bo'lsa
+sudo systemctl stop nginx
+sudo certbot certonly --standalone -d api-voice.backend.uz  # DNS yozuvi bo'lishi va 80-port internetdan ochiq bo'lishi kerak
+sudo cp deploy/nginx/orchestrator.conf /etc/nginx/conf.d/orchestrator.conf   # FAQAT sertifikat olingandan KEYIN (konfiguratsiya uning fayllarini talab qiladi)
+sudo nginx -t && sudo systemctl start nginx
 curl -s https://api-voice.backend.uz/health/live          # {"status":"alive"}
 ```
 
@@ -48,15 +50,22 @@ real_ip_header    X-Forwarded-For;
 ```bash
 sudo apt install -y nginx certbot
 sudo mkdir -p /var/www/certbot /var/www/neurotech-ui
-sudo cp deploy/nginx/ui-domain.conf /etc/nginx/conf.d/ui-domain.conf
-sudo systemctl stop nginx && sudo certbot certonly --standalone -d voice.neurotech.uz && sudo systemctl start nginx
+sudo ufw allow 80,443/tcp                                  # ufw yoqilgan bo'lsa
+sudo systemctl stop nginx
+sudo certbot certonly --standalone -d voice.neurotech.uz
+sudo cp deploy/nginx/ui-domain.conf /etc/nginx/conf.d/ui-domain.conf       # FAQAT sertifikat olingandan KEYIN
 # UI repozitoriysida (in.voice-back-frontend): npm run build -> dist/ papkasi, keyin:
 sudo rsync -a --delete ../in.voice-back-frontend/dist/ /var/www/neurotech-ui/
-sudo nginx -t && sudo systemctl reload nginx
+sudo nginx -t && sudo systemctl start nginx
 curl -s https://voice.neurotech.uz/api/session            # {"authenticated":false,...}
 ```
 
 Sertifikat avtomatik yangilanishi uchun: `sudo systemctl enable --now certbot.timer` (yangilangach `sudo systemctl reload nginx`).
+
+## nginx ishga tushmasa
+
+- `unknown directive "http2"`: nginx 1.25.1 dan eski (Ubuntu 24.04 da 1.24). `deploy/nginx/` dagi fayllar allaqachon `listen 443 ssl http2;` ishlatadi; eski nusxada `listen 443 ssl;` ni (va `[::]` qatorini) `listen 443 ssl http2;` ga almashtiring, `http2 on;` qatorini o'chiring.
+- `cannot load certificate ... fullchain.pem`: sertifikat hali olinmagan. Konfiguratsiyani olib tashlang (`sudo rm /etc/nginx/conf.d/orchestrator.conf`), nginx'ni ishga tushiring, sertifikatni to'g'rilang, keyin konfiguratsiyani qayta nusxalang.
 
 ## Ochishdan oldingi majburiy tekshiruv
 
