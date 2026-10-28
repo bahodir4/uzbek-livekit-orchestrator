@@ -1,5 +1,8 @@
-# Official LiveKit Agents Python v1.8 series, not the older v0.x API.
-livekit-agents[openai,silero]~=1.8.0
+# Official LiveKit Agents Python v1.x API, not the older v0.x one. Pinned to exactly 1.6.0 on purpose: 1.6.1 and later
+# (including 1.8) import the native livekit.local_inference module, which crashes with exit code 132 (illegal
+# instruction) on hosts whose CPU has no AVX/AVX2, e.g. a VM with a generic CPU model. 1.6.0 runs everywhere.
+# On a host with a normal CPU you may use ~=1.8.0; the test suite passes on 1.6.0.
+livekit-agents[openai,silero]==1.6.0
 livekit-api~=1.1
 fastapi>=0.115,<1
 uvicorn[standard]>=0.30,<1
