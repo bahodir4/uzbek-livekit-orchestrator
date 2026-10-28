@@ -118,3 +118,22 @@ def test_capabilities_and_livekit_text_contract(console):
     assert body['tts']['models']==['sayro','navoiy']
     assert body['per_room_model_selection'] is True
     assert body['tts']['sample_rate']==24000
+
+
+def test_greeting_endpoint_serves_the_cached_greeting(console, monkeypatch):
+    from voice_agent import greeting_cache as gc
+    from voice_agent.experience import PERSONAS, DEFAULT_PERSONA
+    from voice_agent.providers import build_tts
+    assert console.get('/api/greeting').status_code == 401
+    authenticate(console)
+    assert console.get('/api/greeting').status_code == 404                  # nothing rendered yet: the agent greets itself
+    # The browser's lookup must hit the very file the worker plays (same key as its DualGatewayTTS)
+    gateway = build_tts(load(), model_override="navoiy")
+    gateway = getattr(gateway, "_wrapped_tts", gateway)
+    text = PERSONAS[DEFAULT_PERSONA]["greeting"]
+    gc.store(gc.cache_path(gateway.selected_model, gateway.voice, gateway.greeting_emotion or gateway.emotion, text),
+             b"\x01\x00" * 2400)
+    r = console.get('/api/greeting', params={"persona": DEFAULT_PERSONA, "model": "navoiy"})
+    assert r.status_code == 200 and r.content == b"\x01\x00" * 2400
+    assert r.headers["x-sample-rate"] == "24000"
+    assert console.get('/api/greeting', params={"persona": "no-such-agent"}).status_code == 422

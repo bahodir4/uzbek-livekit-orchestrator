@@ -36,6 +36,22 @@ def cache_path(model: str, voice: str, emotion: str, text: str) -> Path:
     return cache_dir() / f"{key}.pcm"
 
 
+def cached_greeting(config: dict, persona: str, model: str) -> bytes | None:
+    """The stored greeting of an agent for the browser, or None (not rendered yet, auto_greet off, other TTS type).
+
+    The key must equal the one the worker builds from its DualGatewayTTS (providers.build_tts)."""
+    from .configuration import active_spec
+    from .experience import PERSONAS, canonical_persona
+    if not config.get("agent", {}).get("auto_greet", True):
+        return None
+    spec = active_spec(config, "tts")
+    if spec["type"] != "dual_gateway_stream" or model not in ("sayro", "navoiy"):
+        return None
+    voice = spec.get("voice", model) if model == spec.get("model", "sayro") else model
+    emotion = spec.get("greeting_emotion") or spec.get("emotion", "calm")
+    return load(cache_path(model, voice, emotion, PERSONAS[canonical_persona(persona)]["greeting"]))
+
+
 def load(path: Path) -> bytes | None:
     try:
         pcm = path.read_bytes()

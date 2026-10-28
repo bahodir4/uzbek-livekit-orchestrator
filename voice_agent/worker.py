@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import time
 import json
 import os
 from zoneinfo import ZoneInfo
@@ -96,6 +97,7 @@ def build_tools(config: dict, persona: str = DEFAULT_PERSONA):
 
 @server.rtc_session(agent_name=startup_config["agent"]["name"])
 async def entrypoint(ctx: JobContext) -> None:
+    started = time.monotonic()
     config = load()  # dynamic provider selection for each new session
     turn = config.get("turn", {})
     stt_provider = build_stt(config)
@@ -107,6 +109,7 @@ async def entrypoint(ctx: JobContext) -> None:
     language = 'uz'
     text_only = False
     speak_responses = True
+    greeting_played = False
     previous_messages = []
     try:
         metadata = json.loads(getattr(ctx.job, "metadata", "") or "{}")
@@ -115,6 +118,7 @@ async def entrypoint(ctx: JobContext) -> None:
             language = metadata.get('language') if metadata.get('language') in LANGUAGES else 'uz'
             text_only = metadata.get('text_only') is True
             speak_responses = metadata.get('speak_responses') is not False
+            greeting_played = metadata.get('greeting_played') is True
             previous_messages = metadata.get('previous_messages') if isinstance(metadata.get('previous_messages'), list) else []
             candidate = metadata.get("tts_model")
             if candidate in ("sayro", "navoiy"):
@@ -130,6 +134,9 @@ async def entrypoint(ctx: JobContext) -> None:
     for m in previous_messages[:12]:
         if isinstance(m, dict) and m.get('role') in ('user','agent') and isinstance(m.get('text'), str):
             initial_ctx.add_message(role='assistant' if m['role']=='agent' else 'user', content=m['text'][:400])
+    if greeting_played:
+        # The browser said the greeting itself; the model must know it was said, but must not repeat it
+        initial_ctx.add_message(role='assistant', content=PERSONAS[persona]["greeting"])
     agent_tools = build_tools(config, persona)
     log.info("Agent %s ready: tools=%s text_only=%s", persona,
              [getattr(t, 'info', None).name if getattr(t, 'info', None) else getattr(t, '__name__', '?') for t in agent_tools],
@@ -186,8 +193,12 @@ async def entrypoint(ctx: JobContext) -> None:
             room_options=room_io.RoomOptions(text_input=True, text_output=True,
                 audio_input=not text_only, audio_output=speak_responses and not text_only),
         )
-        if config["agent"].get("auto_greet", True) and not text_only:
+        log.info("Session started room=%s after %.2fs", ctx.room.name, time.monotonic() - started)
+        if greeting_played:
+            log.info("Greeting played by the browser room=%s", ctx.room.name)
+        elif config["agent"].get("auto_greet", True) and not text_only:
             await say_greeting(session, tts_provider, PERSONAS[persona]["greeting"])
+            log.info("Greeting played room=%s after %.2fs", ctx.room.name, time.monotonic() - started)
     except Exception:
         log.exception("LiveKit room session failed")
         raise

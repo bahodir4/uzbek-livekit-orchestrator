@@ -486,6 +486,20 @@ class RoomRequest(BaseModel):
     conversation_id: str = Field(min_length=1, max_length=64)
     text_only: bool = False
     speak_responses: bool = True
+    greeting_played: bool = False       # the browser already played the greeting (GET /api/greeting); the agent skips it
+
+
+@app.get("/api/greeting")
+async def greeting_audio(persona: PersonaId = DEFAULT_PERSONA, model: Literal["sayro", "navoiy"] = "navoiy",
+                         _: str = Depends(require_admin)):
+    """The agent's pre-rendered greeting as raw PCM16 (24 kHz, mono), so the browser can play it the moment a call
+    connects instead of waiting for the agent to join. 404 when there is none; the agent then greets as usual."""
+    from . import greeting_cache
+    pcm = greeting_cache.cached_greeting(load(), persona, model)
+    if not pcm:
+        raise HTTPException(404, "No cached greeting")
+    return Response(pcm, media_type="application/octet-stream",
+                    headers={"X-Sample-Rate": str(greeting_cache.SAMPLE_RATE), "Cache-Control": "private, max-age=300"})
 
 
 @app.post("/api/rooms")
@@ -517,7 +531,7 @@ async def create_room(body: RoomRequest, user: str = Depends(mutation_auth)):
                 room=room_name, agent_name=config["agent"]["name"],
                 metadata=json.dumps({"tts_model": body.model, "persona": body.persona, "language": body.language,
                                      "text_only": body.text_only, "speak_responses": body.speak_responses,
-                                     "previous_messages": resume}),
+                                     "greeting_played": body.greeting_played, "previous_messages": resume}),
             ))
         token = (api.AccessToken(key, secret)
                  .with_identity("operator-" + uuid.uuid4().hex[:16])

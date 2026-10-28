@@ -117,6 +117,8 @@ Connect your LiveKit client or Agents Playground to the same room with a **separ
 
 ## D. Change models from terminal
 
+Replace `LLM_POD_ID`, `STT_POD_ID` and `TTS_POD_ID` in the commands below with your real pod ids before running them. `validate` rejects a URL that still contains `_POD_ID` or `YOUR-`. The CLI rewrites `config/agent.yaml` without its comments; edit the file by hand to keep them.
+
 ```bash
 source .venv/bin/activate
 python -m voice_agent.cli show
@@ -171,3 +173,14 @@ Both transports stream: `http` posts one `/v1/tts/stream` request per piece, `ws
 2. `docker compose restart worker api`, then start a new room.
 3. If the WebSocket cannot be opened or its handshake fails, the adapter logs `TTS websocket unavailable` or `prewarm failed` and uses HTTP for 30 s before trying again. Those log lines mean you are measuring HTTP.
 4. Compare with `python scripts/bench_latency.py` (it runs both transports with the same phrases and drops the first request as warm-up; compare medians). A WebSocket exit -11 in a job process has been seen once, so run many sessions and check the worker logs for job exits before keeping `ws` in production. The fallback does not protect against a process crash.
+
+## H. Worker troubleshooting (Docker)
+
+| Symptom in `docker compose ps` / logs | Cause | Fix |
+|---|---|---|
+| Worker `Restarting (132)`, `Fatal Python error: Illegal instruction` on `import livekit.agents` | The host CPU lacks AVX/AVX2 (a VM with a generic CPU model; check `grep -o 'avx[0-9a-z]*' /proc/cpuinfo`). `livekit-agents` 1.6.1 and later import the native `livekit.local_inference` module, which needs those instructions. | Give the VM a host-passthrough CPU model. If that is impossible, pin `livekit-agents[openai,silero]==1.6.0` (exactly; `~=1.6.0` resolves to 1.6.10, which still crashes) in `requirements.txt` and run `docker compose build worker && docker compose up -d`. Go back to `~=1.8.0` on a normal host. |
+| `PermissionError: [Errno 13] ... /app/config/agent.yaml` | The containers run as uid 10001 and read the bind-mounted `./config`. A config file saved with mode 600 (older `voice_agent.cli` versions did this) is unreadable to them. | `chmod 644 config/agent.yaml`, then `docker compose restart worker api`. Current code keeps the existing file mode. |
+| New rooms fail after a CLI edit, `url still contains a placeholder` | Example commands were pasted with `LLM_POD_ID` etc. | Run the command again with the real proxy hostname. |
+| `docker compose build` finishes but nothing changed | The pip layer is cached when `requirements.txt` is unchanged. | Edit `requirements.txt` (a changed pin invalidates the layer), or add `--no-cache`. |
+
+Only paste the code blocks of these docs into the shell; a prose line is run as a command.

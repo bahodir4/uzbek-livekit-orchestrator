@@ -67,3 +67,11 @@ class TestProviderSet(unittest.TestCase):
                     set_provider_field('tts', 'sayro_primary', 'api_key', 'BAD')
             finally:
                 os.environ.pop('AGENT_CONFIG_PATH', None)
+
+
+class TestPlaceholderUrls(unittest.TestCase):
+    def test_placeholder_url_is_rejected(self):
+        data = copy.deepcopy(load())
+        data['providers']['stt'][data['active']['stt']]['url'] = 'https://STT_POD_ID-8000.proxy.runpod.net'
+        with self.assertRaisesRegex(ValueError, 'placeholder'):
+            validate(data)

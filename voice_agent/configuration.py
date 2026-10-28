@@ -37,6 +37,9 @@ def safe_config(data: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+PLACEHOLDER_MARKERS = ("_POD_ID", "YOUR-")   # copied from the docs without filling in the real pod id
+
+
 def validate(data: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(data, dict) or data.get("version") != 1:
         raise ValueError("Expected agent configuration version: 1")
@@ -49,6 +52,8 @@ def validate(data: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"Unsupported {category} type: {spec.get('type')}")
         if not str(spec.get("url", "")).startswith(("http://", "https://")):
             raise ValueError(f"{category}.{selected} url must be http(s)")
+        if any(marker in str(spec["url"]) for marker in PLACEHOLDER_MARKERS):
+            raise ValueError(f"{category}.{selected} url still contains a placeholder: {spec['url']}")
         if not spec.get("api_key_env"):
             raise ValueError(f"{category}.{selected} missing api_key_env")
     turn = data.get("turn", {})
