@@ -130,6 +130,8 @@ def save_atomic(data: dict[str, Any], path: Path | None = None) -> None:
             yaml.safe_dump(data, file, sort_keys=False, allow_unicode=True)
             file.flush()
             os.fsync(file.fileno())
+        # mkstemp creates 0600; the containers run as another uid and must still read the file
+        os.chmod(temp_path, path.stat().st_mode & 0o777 if path.exists() else 0o644)
         os.replace(temp_path, path)
     finally:
         if os.path.exists(temp_path):

@@ -41,9 +41,18 @@ It stops old copies, starts Navoiy and waits until it is loaded and warm, starts
 
 Both health endpoints need the key (`Authorization: Bearer <key>`): the gateway uses `TTS_API_KEY`, the Navoiy worker uses `NAVOIY_API_KEY`. Only `/health/live` is open. A keyless `/health/ready` answers `Invalid API key`.
 
-If startup fails: `tail -n 30 /workspace/navoiy.log` and `tail -n 30 /workspace/gateway.log`.
+If startup fails: `tail -n 30 /workspace/logs/navoiy.log` and `tail -n 30 /workspace/gateway.log` (a pod set up with `restart_tts.sh` in 5b logs to `/workspace/navoiy.log`).
 
-**Port already in use** (`[Errno 98]`, uvicorn exit code 3): find the owner with `ss -ltnp | grep ':8000'`. If it is an old gateway, `pkill -f gateway.app` and start again. If it is another service, start the gateway on another port and expose that port in RunPod:
+**`ERROR Navoiy did not become ready`** does not always mean a failure: `start_all.sh` can stop waiting before the model has finished loading. Read the end of `/workspace/logs/navoiy.log`. If it shows `model loaded in ...` and `warm-up done`, Navoiy is up (confirm with `ps aux | grep navoiy_worker` and `nvidia-smi`, about 3.8 GB VRAM). Do **not** rerun `start_all.sh`, because it stops the running copies and reloads the model. Start only the gateway:
+
+```bash
+cd /workspace/uzbek-dual-tts-backend
+nohup ./scripts/start_gateway.sh > /workspace/gateway.log 2>&1 &
+```
+
+If the log shows `CUDA out of memory`, an old process still holds the GPU: `pkill -f navoiy_worker`, check that `nvidia-smi` shows free VRAM, then run `start_all.sh` again.
+
+**Port already in use** (`[Errno 98]`, uvicorn exit code 3): find the owner with `ss -ltnp | grep ':8000'`. If it is an old gateway, `pkill -f gateway.app` and start again. If it is another service, start the gateway on another port and expose that port in RunPod (RunPod only proxies the ports you expose, normally `8000/http`; a gateway on 8010 is unreachable from the orchestrator until 8010 is exposed too, so use the default 8000 whenever you can):
 
 ```bash
 GATEWAY_PORT=8010 nohup ./scripts/start_gateway.sh > /workspace/gateway.log 2>&1 &
@@ -63,7 +72,14 @@ curl -fS http://127.0.0.1:8000/v1/tts \
 file navoiy-test.wav && ls -lh navoiy-test.wav
 ```
 
-Check that the file is a playable WAV and not an error payload. Streaming test: `python scripts/test_stream.py`.
+Check that the file is a playable WAV (`RIFF ... WAVE audio, 16 bit, mono 24000 Hz`) and not an error payload. Streaming test: `python scripts/test_stream.py`. The orchestrator uses `/v1/tts/stream` (HTTP) or `/v1/tts/ws` (WebSocket), not `/v1/tts`, so also check the stream endpoint returns bytes:
+
+```bash
+curl -sS -N -H "Authorization: Bearer $TTS_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"model":"navoiy","text":"Assalomu alaykum!"}' http://127.0.0.1:8000/v1/tts/stream | wc -c
+```
+
+**Expected `degraded` status:** without Sayro installed, `/health/ready` reports `"sayro": {"reachable": false, "state": "unreachable"}` and `"status": "degraded"`, but `"ready": true` as long as Navoiy is ready. This is normal for a Navoiy-only pod. Selecting Sayro in the UI fails until it is installed (`03_SAYRO_TTS_RUNPOD_UPDATED.md`).
 
 ## 5. Configure the LiveKit orchestrator
 
@@ -77,17 +93,20 @@ tts:
     api_key_env: TTS_API_KEY
     model: navoiy
     voice: navoiy
-    emotion: calm
+    emotion: warm
+    greeting_emotion: warm
+    phrase_cache: true
     sample_rate: 24000
-    max_chars_per_request: 220
+    max_chars_per_request: 340
     timeout_seconds: 120
     max_audio_seconds: 35
-    streaming_mode: pcm_http
+    streaming_mode: pcm_http    # required for dual_gateway_stream, also when transport is ws
     transport: http             # 'ws' is faster in the benchmark but crashed a job process once (exit -11): keep http until investigated
     prefetch_phrases: 2
+    input_streaming: true
 ```
 
-Put the same `TTS_API_KEY` in the orchestrator `.env`. `api_key_env` is a variable **name**, never the secret. Optional lower latency: add `transport: ws` (falls back to HTTP).
+Put the same `TTS_API_KEY` in the orchestrator `.env`. `api_key_env` is a variable **name**, never the secret. Optional lower latency: set `transport: ws` (falls back to HTTP for 30 s when the socket cannot open). `http` is still streaming (the gateway returns PCM chunks as they are generated); `ws` only saves the per-request setup, about 0.4 s of first audio in the benchmark. See `04_ORCHESTRATOR_WIRING.md` section G.
 
 ## 5b. Restart script for a pod without `start_all.sh`
 
@@ -143,7 +162,7 @@ Do not paste or `cat` the `.env` into chat; it holds the keys. To show the setti
 2. `./scripts/preflight.sh --role navoiy,gateway` shows no FAIL.
 3. Run the start block in section 3.
 4. Generate a playable WAV (section 4).
-5. Update `config/agent.yaml` if the proxy hostname changed.
+5. Update `config/agent.yaml` if the proxy hostname changed (a new pod gets a new `-8000.proxy.runpod.net` URL), then recreate the orchestrator containers (see `04_ORCHESTRATOR_WIRING.md` section B).
 6. `python scripts/bench_latency.py`, then a full LiveKit call.
 
 ## 7. Security and operations

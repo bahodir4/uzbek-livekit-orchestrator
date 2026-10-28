@@ -46,6 +46,7 @@ cat > /workspace/start_llm.sh <<'EOF'
 #!/usr/bin/env bash
 source /workspace/gemma-vllm-venv/bin/activate
 export HF_HOME=/workspace/gemma-hf-cache
+export VLLM_API_KEY=IA6hiiiLD0_4W_bkuMcefR2IVLZDrHOIlk2UIhG09so
 : "${VLLM_API_KEY:?set VLLM_API_KEY first}"
 exec vllm serve google/gemma-4-31B-it --host 0.0.0.0 --port 8000 \
   --dtype bfloat16 --max-model-len 8192 --gpu-memory-utilization 0.90 \

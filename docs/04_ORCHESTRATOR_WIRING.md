@@ -77,6 +77,20 @@ docker compose up -d
 docker compose logs -f worker api
 ```
 
+**Applying changes:** `./config` is bind-mounted into both containers, so an edited `config/agent.yaml` (provider URLs, `transport`, `emotion`, ...) needs no rebuild. Restart both services, since the worker reads the config for each new session and the api serves it:
+
+```bash
+docker compose restart worker api
+```
+
+Values from `.env` (`STT_API_KEY`, `VLLM_API_KEY`, `TTS_API_KEY`, `TTS_GATEWAY_URL`) are read only when a container is created, so `restart` does not reload them. After changing `.env`, or after pointing to a new pod with a new key, use:
+
+```bash
+docker compose up -d --force-recreate worker api
+```
+
+`TTS_GATEWAY_URL`, when set in `.env`, overrides the TTS `url` in `agent.yaml`; remove or update it when the pod changes. Rebuild (`docker compose build`) only after Python or `requirements.txt` changes. Running sessions keep the old settings; start a new room to test.
+
 The `admin` service exposes protected Swagger only at `127.0.0.1:8090/docs` on the orchestrator host; do **not** publicly expose basic-auth admin over HTTP. Use an SSH tunnel/VPN if accessing from a different computer. Docker containers cannot access a different host's `127.0.0.1`; configure reachable service URLs.
 
 **Run without Docker** (if Docker is unavailable):
@@ -148,3 +162,12 @@ Limits measured on the Navoiy pod: the gateway and the Navoiy worker accept at m
 - After a deploy, or after changing `emotion`, render the fixed phrases once: `docker compose exec worker python -m voice_agent.greeting_cache`.
 - The model is told to use the filler sentences word for word (`agents/shared_rules.md`, from `agents/phrases.yaml`), so they hit the cache.
 - Emotion: `emotion` and `greeting_emotion` in `config/agent.yaml`. Valid names found on the Navoiy pod: `calm`, `warm`, `gentle`, `happy`, `excited`, `sad`, `angry`, `surprised`. Listen to the same sentences in each before choosing; after a change, restart the worker and re-run the render command above. An unknown emotion makes the gateway drop the connection instead of answering with an error.
+
+### Switching the TTS transport (http / ws)
+
+Both transports stream: `http` posts one `/v1/tts/stream` request per piece, `ws` keeps two WebSockets to `/v1/tts/ws` open from the start of the session (opened in `prewarm`) and reuses them, which saves the per-request setup (benchmark: first audio about 1.3-1.9 s with ws against 1.7-2.3 s with http). `streaming_mode: pcm_http` stays set for both.
+
+1. Set `transport: ws` (or `http`) under `providers.tts.dual_gateway` in `config/agent.yaml`.
+2. `docker compose restart worker api`, then start a new room.
+3. If the WebSocket cannot be opened or its handshake fails, the adapter logs `TTS websocket unavailable` or `prewarm failed` and uses HTTP for 30 s before trying again. Those log lines mean you are measuring HTTP.
+4. Compare with `python scripts/bench_latency.py` (it runs both transports with the same phrases and drops the first request as warm-up; compare medians). A WebSocket exit -11 in a job process has been seen once, so run many sessions and check the worker logs for job exits before keeping `ws` in production. The fallback does not protect against a process crash.
